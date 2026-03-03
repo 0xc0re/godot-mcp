@@ -9,9 +9,9 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 ### Foundation
 
-- [ ] **FOUN-01**: MCP SDK upgraded from 0.6.0 to latest (1.27.1+) so tools are discoverable by Claude Code
-- [ ] **FOUN-02**: All tool handlers migrated from deprecated `server.tool()` to `McpServer.registerTool()` API
-- [ ] **FOUN-03**: Zod added as explicit dependency (^3.25.0+) per SDK 1.x requirements
+- [x] **FOUN-01**: MCP SDK upgraded from 0.6.0 to latest (1.27.1+) so tools are discoverable by Claude Code
+- [x] **FOUN-02**: All tool handlers migrated from deprecated `server.tool()` to `McpServer.registerTool()` API
+- [x] **FOUN-03**: Zod added as explicit dependency (^3.25.0+) per SDK 1.x requirements
 - [ ] **FOUN-04**: Process execution hardened with `maxBuffer`, `timeout`, and zombie process prevention
 - [ ] **FOUN-05**: Every tool returns actionable error messages with suggested next steps, not raw Godot stderr
 - [ ] **FOUN-06**: Monolithic `src/index.ts` refactored into domain modules (one module per tool category)
@@ -78,9 +78,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| FOUN-01 | Phase 1 | Pending |
-| FOUN-02 | Phase 1 | Pending |
-| FOUN-03 | Phase 1 | Pending |
+| FOUN-01 | Phase 1 | Complete |
+| FOUN-02 | Phase 1 | Complete |
+| FOUN-03 | Phase 1 | Complete |
 | FOUN-04 | Phase 1 | Pending |
 | FOUN-05 | Phase 1 | Pending |
 | FOUN-06 | Phase 1 | Pending |
