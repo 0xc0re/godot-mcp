@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v0.1
 milestone_name: milestone
 status: in-progress
-stopped_at: Completed 02-01-PLAN.md (.tscn/.tres parser)
-last_updated: "2026-03-03T22:19:59Z"
-last_activity: 2026-03-03 — Completed 02-01-PLAN.md (.tscn/.tres text parser)
+stopped_at: Completed 02-02-PLAN.md (scene MCP tools)
+last_updated: "2026-03-03T22:28:16Z"
+last_activity: 2026-03-03 — Completed 02-02-PLAN.md (scene MCP tools)
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 6
-  completed_plans: 4
-  percent: 33
+  completed_plans: 5
+  percent: 42
 ---
 
 # Project State
@@ -26,28 +26,28 @@ See: .planning/PROJECT.md (updated 2026-03-03)
 ## Current Position
 
 Phase: 2 of 4 (Scene Intelligence)
-Plan: 1 of 3 in current phase -- COMPLETE
+Plan: 2 of 3 in current phase -- COMPLETE
 Status: In Progress
-Last activity: 2026-03-03 — Completed 02-01-PLAN.md (.tscn/.tres text parser)
+Last activity: 2026-03-03 — Completed 02-02-PLAN.md (scene MCP tools)
 
-Progress: [######░░░░] 33%
+Progress: [########░░] 42%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
-- Average duration: 5min
-- Total execution time: 0.30 hours
+- Total plans completed: 5
+- Average duration: 4min
+- Total execution time: 0.37 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-foundation | 3 | 14min | 5min |
-| 02-scene-intelligence | 1 | 4min | 4min |
+| 02-scene-intelligence | 2 | 8min | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (5min), 01-02 (5min), 01-03 (4min), 02-01 (4min)
+- Last 5 plans: 01-01 (5min), 01-02 (5min), 01-03 (4min), 02-01 (4min), 02-02 (4min)
 - Trend: stable
 
 *Updated after each plan completion*
@@ -74,6 +74,9 @@ Recent decisions affecting current work:
 - [02-01]: Properties stored as raw strings — no type conversion in parser (Godot handles types)
 - [02-01]: Multi-line values detected via bracket/paren/brace balance counting
 - [02-01]: SceneNode.parent is undefined for root node, '.' for direct children (matches Godot format)
+- [02-02]: Read operations use TypeScript parser (fast); write operations use Godot headless (correct types)
+- [02-02]: Added ensure_res_prefix helper for DRY res:// path handling in GDScript
+- [02-02]: Value type hints optional with string pass-through default for complex Godot values
 
 ### Pending Todos
 
@@ -88,5 +91,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-03
-Stopped at: Completed 02-01-PLAN.md (.tscn/.tres parser)
+Stopped at: Completed 02-02-PLAN.md (scene MCP tools)
 Resume file: None
