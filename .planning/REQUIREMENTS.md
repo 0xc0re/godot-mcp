@@ -12,11 +12,11 @@ Requirements for this milestone. Each maps to roadmap phases.
 - [x] **FOUN-01**: MCP SDK upgraded from 0.6.0 to latest (1.27.1+) so tools are discoverable by Claude Code
 - [x] **FOUN-02**: All tool handlers migrated from deprecated `server.tool()` to `McpServer.registerTool()` API
 - [x] **FOUN-03**: Zod added as explicit dependency (^3.25.0+) per SDK 1.x requirements
-- [ ] **FOUN-04**: Process execution hardened with `maxBuffer`, `timeout`, and zombie process prevention
-- [ ] **FOUN-05**: Every tool returns actionable error messages with suggested next steps, not raw Godot stderr
+- [x] **FOUN-04**: Process execution hardened with `maxBuffer`, `timeout`, and zombie process prevention
+- [x] **FOUN-05**: Every tool returns actionable error messages with suggested next steps, not raw Godot stderr
 - [x] **FOUN-06**: Monolithic `src/index.ts` refactored into domain modules (one module per tool category)
 - [x] **FOUN-07**: Stdout/stderr separation enforced — zero `console.log` in server code (all logs to stderr)
-- [ ] **FOUN-08**: SIGINT and SIGTERM handlers registered for reliable cleanup of child processes
+- [x] **FOUN-08**: SIGINT and SIGTERM handlers registered for reliable cleanup of child processes
 
 ### Scene Management
 
@@ -81,11 +81,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FOUN-01 | Phase 1 | Complete |
 | FOUN-02 | Phase 1 | Complete |
 | FOUN-03 | Phase 1 | Complete |
-| FOUN-04 | Phase 1 | Pending |
-| FOUN-05 | Phase 1 | Pending |
+| FOUN-04 | Phase 1 | Complete |
+| FOUN-05 | Phase 1 | Complete |
 | FOUN-06 | Phase 1 | Complete |
 | FOUN-07 | Phase 1 | Complete |
-| FOUN-08 | Phase 1 | Pending |
+| FOUN-08 | Phase 1 | Complete |
 | SCEN-01 | Phase 2 | Pending |
 | SCEN-02 | Phase 2 | Pending |
 | SCEN-03 | Phase 2 | Pending |
