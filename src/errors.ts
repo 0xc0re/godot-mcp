@@ -7,9 +7,10 @@
 
 /**
  * Return type matching MCP SDK CallToolResult shape.
- * Inlined to avoid depending on SDK internal types that may move.
+ * Index signature required for compatibility with SDK's typed result.
  */
 export interface ToolResult {
+  [key: string]: unknown;
   content: Array<{ type: 'text'; text: string }>;
   isError?: boolean;
 }
