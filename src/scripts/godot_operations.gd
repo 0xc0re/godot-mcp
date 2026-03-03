@@ -71,6 +71,12 @@ func _init():
             get_uid(params)
         "resave_resources":
             resave_resources(params)
+        "modify_node_property":
+            modify_node_property(params)
+        "remove_node":
+            remove_node(params)
+        "attach_script":
+            attach_script(params)
         _:
             log_error("Unknown operation: " + operation)
             quit(1)
@@ -1190,3 +1196,270 @@ func save_scene(params):
             printerr("Failed to save scene: " + str(error))
     else:
         printerr("Failed to pack scene: " + str(result))
+
+# Helper: ensure a path starts with res://
+func ensure_res_prefix(path: String) -> String:
+    if not path.begins_with("res://"):
+        return "res://" + path
+    return path
+
+# Helper: convert a JSON value to the appropriate Godot type based on type_hint
+func convert_json_to_godot_type(value, type_hint: String):
+    match type_hint:
+        "Vector2":
+            return Vector2(value.x, value.y)
+        "Vector3":
+            return Vector3(value.x, value.y, value.z)
+        "Color":
+            var a = value.a if value.has("a") else 1.0
+            return Color(value.r, value.g, value.b, a)
+        "bool":
+            return bool(value)
+        "int":
+            return int(value)
+        "float":
+            return float(value)
+        _:
+            return value
+
+# Modify a property on a node in a scene
+func modify_node_property(params):
+    print("Modifying node property in scene: " + params.scene_path)
+
+    var full_scene_path = ensure_res_prefix(params.scene_path)
+    if debug_mode:
+        print("Full scene path: " + full_scene_path)
+
+    # Load the scene
+    var scene = load(full_scene_path)
+    if not scene:
+        log_error("Failed to load scene: " + full_scene_path)
+        quit(1)
+
+    if debug_mode:
+        print("Scene loaded successfully")
+
+    # Instantiate the scene
+    var scene_root = scene.instantiate()
+    if debug_mode:
+        print("Scene instantiated")
+
+    # Navigate to the target node
+    var node_path = params.node_path
+    if debug_mode:
+        print("Original node path: " + node_path)
+
+    var target = scene_root
+    if node_path.begins_with("root/"):
+        var relative_path = node_path.substr(5)  # Remove "root/" prefix
+        if relative_path != "":
+            target = scene_root.get_node(relative_path)
+        # else target stays as scene_root
+    elif node_path != "root" and node_path != "":
+        target = scene_root.get_node(node_path)
+
+    if not target:
+        log_error("Node not found: " + params.node_path)
+        quit(1)
+
+    if debug_mode:
+        print("Target node found: " + target.name)
+
+    # Convert the value to the correct Godot type
+    var type_hint = params.value_type if params.has("value_type") else ""
+    var converted_value = convert_json_to_godot_type(params.value, type_hint)
+    if debug_mode:
+        print("Setting property '" + params.property_name + "' to: " + str(converted_value))
+
+    # Set the property
+    target.set(params.property_name, converted_value)
+
+    # Re-pack and save
+    var packed_scene = PackedScene.new()
+    var result = packed_scene.pack(scene_root)
+    if debug_mode:
+        print("Pack result: " + str(result) + " (OK=" + str(OK) + ")")
+
+    if result != OK:
+        log_error("Failed to pack scene after modification: " + str(result))
+        quit(1)
+
+    var save_error = ResourceSaver.save(packed_scene, full_scene_path)
+    if debug_mode:
+        print("Save result: " + str(save_error) + " (OK=" + str(OK) + ")")
+
+    if save_error != OK:
+        log_error("Failed to save scene: " + str(save_error))
+        quit(1)
+
+    var result_json = {
+        "success": true,
+        "node": params.node_path,
+        "property": params.property_name,
+        "value": str(converted_value)
+    }
+    print(JSON.stringify(result_json))
+
+# Remove a node from a scene by path
+func remove_node(params):
+    print("Removing node from scene: " + params.scene_path)
+
+    var full_scene_path = ensure_res_prefix(params.scene_path)
+    if debug_mode:
+        print("Full scene path: " + full_scene_path)
+
+    # Load the scene
+    var scene = load(full_scene_path)
+    if not scene:
+        log_error("Failed to load scene: " + full_scene_path)
+        quit(1)
+
+    if debug_mode:
+        print("Scene loaded successfully")
+
+    # Instantiate the scene
+    var scene_root = scene.instantiate()
+    if debug_mode:
+        print("Scene instantiated")
+
+    # Navigate to the target node
+    var node_path = params.node_path
+    if debug_mode:
+        print("Original node path: " + node_path)
+
+    # Guard: cannot remove root node
+    if node_path == "root" or node_path == "":
+        log_error("Cannot remove the root node")
+        quit(1)
+
+    var target = scene_root
+    if node_path.begins_with("root/"):
+        var relative_path = node_path.substr(5)  # Remove "root/" prefix
+        if relative_path == "":
+            log_error("Cannot remove the root node")
+            quit(1)
+        target = scene_root.get_node(relative_path)
+    else:
+        target = scene_root.get_node(node_path)
+
+    if not target:
+        log_error("Node not found: " + params.node_path)
+        quit(1)
+
+    if debug_mode:
+        print("Target node found: " + target.name)
+
+    # Remove the node
+    target.get_parent().remove_child(target)
+    target.queue_free()
+    if debug_mode:
+        print("Node removed")
+
+    # Re-pack and save
+    var packed_scene = PackedScene.new()
+    var result = packed_scene.pack(scene_root)
+    if debug_mode:
+        print("Pack result: " + str(result) + " (OK=" + str(OK) + ")")
+
+    if result != OK:
+        log_error("Failed to pack scene after removal: " + str(result))
+        quit(1)
+
+    var save_error = ResourceSaver.save(packed_scene, full_scene_path)
+    if debug_mode:
+        print("Save result: " + str(save_error) + " (OK=" + str(OK) + ")")
+
+    if save_error != OK:
+        log_error("Failed to save scene: " + str(save_error))
+        quit(1)
+
+    var result_json = {
+        "success": true,
+        "removed": params.node_path
+    }
+    print(JSON.stringify(result_json))
+
+# Attach a GDScript file to a node in a scene
+func attach_script(params):
+    print("Attaching script to node in scene: " + params.scene_path)
+
+    var full_scene_path = ensure_res_prefix(params.scene_path)
+    if debug_mode:
+        print("Full scene path: " + full_scene_path)
+
+    # Load the scene
+    var scene = load(full_scene_path)
+    if not scene:
+        log_error("Failed to load scene: " + full_scene_path)
+        quit(1)
+
+    if debug_mode:
+        print("Scene loaded successfully")
+
+    # Instantiate the scene
+    var scene_root = scene.instantiate()
+    if debug_mode:
+        print("Scene instantiated")
+
+    # Navigate to the target node
+    var node_path = params.node_path
+    if debug_mode:
+        print("Original node path: " + node_path)
+
+    var target = scene_root
+    if node_path.begins_with("root/"):
+        var relative_path = node_path.substr(5)  # Remove "root/" prefix
+        if relative_path != "":
+            target = scene_root.get_node(relative_path)
+    elif node_path != "root" and node_path != "":
+        target = scene_root.get_node(node_path)
+
+    if not target:
+        log_error("Node not found: " + params.node_path)
+        quit(1)
+
+    if debug_mode:
+        print("Target node found: " + target.name)
+
+    # Load the script
+    var full_script_path = ensure_res_prefix(params.script_path)
+    if debug_mode:
+        print("Full script path: " + full_script_path)
+
+    var script = load(full_script_path)
+    if not script:
+        log_error("Failed to load script: " + full_script_path)
+        quit(1)
+
+    if debug_mode:
+        print("Script loaded successfully")
+
+    # Attach the script to the node
+    target.set_script(script)
+    if debug_mode:
+        print("Script attached to node")
+
+    # Re-pack and save
+    var packed_scene = PackedScene.new()
+    var result = packed_scene.pack(scene_root)
+    if debug_mode:
+        print("Pack result: " + str(result) + " (OK=" + str(OK) + ")")
+
+    if result != OK:
+        log_error("Failed to pack scene after attaching script: " + str(result))
+        quit(1)
+
+    var save_error = ResourceSaver.save(packed_scene, full_scene_path)
+    if debug_mode:
+        print("Save result: " + str(save_error) + " (OK=" + str(OK) + ")")
+
+    if save_error != OK:
+        log_error("Failed to save scene: " + str(save_error))
+        quit(1)
+
+    var result_json = {
+        "success": true,
+        "node": params.node_path,
+        "script": params.script_path
+    }
+    print(JSON.stringify(result_json))
