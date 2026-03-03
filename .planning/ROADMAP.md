@@ -63,7 +63,12 @@ Plans:
   3. User can list all project scripts and see each script's class name, exported variables, signals, and public methods
   4. User can query ClassDB for a Godot class and receive its properties, methods, and signals to verify API correctness
   5. User can @mention a scene or script in Claude Code and receive it as inline context
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — Project settings parser (TDD) + read_project_settings and modify_project_setting tools
+- [ ] 03-02-PLAN.md — Script introspection: list_scripts and query_class GDScript operations + MCP tools
+- [ ] 03-03-PLAN.md — MCP resources: scene and script @mention via ResourceTemplate registration
 
 ### Phase 4: Diagnostics & Runtime
 **Goal**: An AI can get type-aware GDScript diagnostics from the live LSP and capture a screenshot of the running game for visual inspection
@@ -83,5 +88,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Foundation | 3/3 | Complete | 2026-03-03 |
 | 2. Scene Intelligence | 3/3 | Complete | 2026-03-03 |
-| 3. Project & Script Intelligence | 0/TBD | Not started | - |
+| 3. Project & Script Intelligence | 0/3 | Not started | - |
 | 4. Diagnostics & Runtime | 0/TBD | Not started | - |
