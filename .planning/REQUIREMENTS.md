@@ -14,8 +14,8 @@ Requirements for this milestone. Each maps to roadmap phases.
 - [x] **FOUN-03**: Zod added as explicit dependency (^3.25.0+) per SDK 1.x requirements
 - [ ] **FOUN-04**: Process execution hardened with `maxBuffer`, `timeout`, and zombie process prevention
 - [ ] **FOUN-05**: Every tool returns actionable error messages with suggested next steps, not raw Godot stderr
-- [ ] **FOUN-06**: Monolithic `src/index.ts` refactored into domain modules (one module per tool category)
-- [ ] **FOUN-07**: Stdout/stderr separation enforced — zero `console.log` in server code (all logs to stderr)
+- [x] **FOUN-06**: Monolithic `src/index.ts` refactored into domain modules (one module per tool category)
+- [x] **FOUN-07**: Stdout/stderr separation enforced — zero `console.log` in server code (all logs to stderr)
 - [ ] **FOUN-08**: SIGINT and SIGTERM handlers registered for reliable cleanup of child processes
 
 ### Scene Management
@@ -83,8 +83,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FOUN-03 | Phase 1 | Complete |
 | FOUN-04 | Phase 1 | Pending |
 | FOUN-05 | Phase 1 | Pending |
-| FOUN-06 | Phase 1 | Pending |
-| FOUN-07 | Phase 1 | Pending |
+| FOUN-06 | Phase 1 | Complete |
+| FOUN-07 | Phase 1 | Complete |
 | FOUN-08 | Phase 1 | Pending |
 | SCEN-01 | Phase 2 | Pending |
 | SCEN-02 | Phase 2 | Pending |
