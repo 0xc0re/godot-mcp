@@ -20,16 +20,21 @@ Decimal phases appear between their surrounding integers in numeric order.
 ## Phase Details
 
 ### Phase 1: Foundation
-**Goal**: All 12 existing tools are discoverable and working in Claude Code; codebase is modular and safe to extend
+**Goal**: All 14 existing tools are discoverable and working in Claude Code; codebase is modular and safe to extend
 **Depends on**: Nothing (first phase)
 **Requirements**: FOUN-01, FOUN-02, FOUN-03, FOUN-04, FOUN-05, FOUN-06, FOUN-07, FOUN-08
 **Success Criteria** (what must be TRUE):
-  1. Claude Code connects to the server and lists all 12 tools without any configuration workaround
+  1. Claude Code connects to the server and lists all 14 tools without any configuration workaround
   2. Every tool call returns a structured error with a suggested next step when it fails, not raw Godot stderr
   3. The server starts and shuts down cleanly — no zombie Godot processes left behind after SIGINT or SIGTERM
   4. No console.log output appears on stdout in the server process under any code path
   5. src/index.ts is under 100 lines; each tool domain lives in its own module under src/tools/
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — SDK upgrade to 1.27.1+, Zod dependency, migrate all 14 tools to McpServer.registerTool()
+- [ ] 01-02-PLAN.md — Refactor monolithic index.ts into domain modules (types, errors, godot, tools/)
+- [ ] 01-03-PLAN.md — Process hardening (maxBuffer/timeout), signal handlers (SIGINT/SIGTERM), error audit
 
 ### Phase 2: Scene Intelligence
 **Goal**: An AI can read any scene tree, modify node properties, restructure scenes, and catch GDScript parse errors — all without opening the Godot editor
@@ -71,7 +76,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/TBD | Not started | - |
+| 1. Foundation | 0/3 | Planning complete | - |
 | 2. Scene Intelligence | 0/TBD | Not started | - |
 | 3. Project & Script Intelligence | 0/TBD | Not started | - |
 | 4. Diagnostics & Runtime | 0/TBD | Not started | - |
