@@ -46,7 +46,12 @@ Plans:
   3. User can remove a node from a scene and attach a GDScript file to a node in a single session
   4. User can create and read back a .tres resource file (material, curve, atlas)
   5. User can run a batch GDScript parse check and receive a list of files with errors and line numbers
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — TDD: .tscn/.tres text format parser (types + parser + tests)
+- [ ] 02-02-PLAN.md — Scene tools: read_scene, modify_node_property, remove_node, attach_script (GDScript ops + MCP tools)
+- [ ] 02-03-PLAN.md — Resource tools + script validation: create_resource, read_resource, validate_scripts (GDScript ops + MCP tools + wiring)
 
 ### Phase 3: Project & Script Intelligence
 **Goal**: An AI can scaffold and configure a Godot project, read script structure without reading full files, and reference scenes/scripts as Claude Code @mentions
@@ -76,7 +81,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/3 | Planning complete | - |
-| 2. Scene Intelligence | 0/TBD | Not started | - |
+| 1. Foundation | 3/3 | Complete | 2026-03-03 |
+| 2. Scene Intelligence | 0/3 | Planning complete | - |
 | 3. Project & Script Intelligence | 0/TBD | Not started | - |
 | 4. Diagnostics & Runtime | 0/TBD | Not started | - |
