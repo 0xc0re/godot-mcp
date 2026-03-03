@@ -20,12 +20,12 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 ### Scene Management
 
-- [ ] **SCEN-01**: User can read/inspect a scene tree as structured JSON (nodes, types, properties, hierarchy)
+- [x] **SCEN-01**: User can read/inspect a scene tree as structured JSON (nodes, types, properties, hierarchy)
 - [ ] **SCEN-02**: User can modify node properties headlessly (position, scale, visibility, custom properties)
 - [ ] **SCEN-03**: User can remove a node from a scene by path
 - [ ] **SCEN-04**: User can attach a GDScript file to a node in a scene
 - [ ] **SCEN-05**: User can create Godot resource files (.tres) for materials, curves, atlases
-- [ ] **SCEN-06**: User can read/inspect Godot resource files (.tres) as structured data
+- [x] **SCEN-06**: User can read/inspect Godot resource files (.tres) as structured data
 
 ### Script & Code Intelligence
 
@@ -86,12 +86,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FOUN-06 | Phase 1 | Complete |
 | FOUN-07 | Phase 1 | Complete |
 | FOUN-08 | Phase 1 | Complete |
-| SCEN-01 | Phase 2 | Pending |
+| SCEN-01 | Phase 2 | Complete |
 | SCEN-02 | Phase 2 | Pending |
 | SCEN-03 | Phase 2 | Pending |
 | SCEN-04 | Phase 2 | Pending |
 | SCEN-05 | Phase 2 | Pending |
-| SCEN-06 | Phase 2 | Pending |
+| SCEN-06 | Phase 2 | Complete |
 | SCRI-01 | Phase 2 | Pending |
 | SCRI-02 | Phase 3 | Pending |
 | SCRI-03 | Phase 4 | Pending |
@@ -108,4 +108,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-03-03*
-*Last updated: 2026-03-03 after roadmap creation*
+*Last updated: 2026-03-03 after 02-01 parser plan completion*
