@@ -24,12 +24,12 @@ Requirements for this milestone. Each maps to roadmap phases.
 - [x] **SCEN-02**: User can modify node properties headlessly (position, scale, visibility, custom properties)
 - [x] **SCEN-03**: User can remove a node from a scene by path
 - [x] **SCEN-04**: User can attach a GDScript file to a node in a scene
-- [ ] **SCEN-05**: User can create Godot resource files (.tres) for materials, curves, atlases
+- [x] **SCEN-05**: User can create Godot resource files (.tres) for materials, curves, atlases
 - [x] **SCEN-06**: User can read/inspect Godot resource files (.tres) as structured data
 
 ### Script & Code Intelligence
 
-- [ ] **SCRI-01**: User can batch-validate all GDScript files for parse errors via `godot --check-only --headless`
+- [x] **SCRI-01**: User can batch-validate all GDScript files for parse errors via `godot --check-only --headless`
 - [ ] **SCRI-02**: User can list all project scripts with structure summary (exported functions, variables, signals)
 - [ ] **SCRI-03**: User can get real-time GDScript diagnostics via Godot's LSP (syntax errors, type warnings)
 - [ ] **SCRI-04**: User can query Godot's ClassDB for class properties, methods, and signals to prevent AI hallucination
@@ -90,9 +90,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SCEN-02 | Phase 2 | Complete |
 | SCEN-03 | Phase 2 | Complete |
 | SCEN-04 | Phase 2 | Complete |
-| SCEN-05 | Phase 2 | Pending |
+| SCEN-05 | Phase 2 | Complete |
 | SCEN-06 | Phase 2 | Complete |
-| SCRI-01 | Phase 2 | Pending |
+| SCRI-01 | Phase 2 | Complete |
 | SCRI-02 | Phase 3 | Pending |
 | SCRI-03 | Phase 4 | Pending |
 | SCRI-04 | Phase 3 | Pending |

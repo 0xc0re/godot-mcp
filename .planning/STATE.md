@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v0.1
 milestone_name: milestone
-status: in-progress
-stopped_at: Completed 02-02-PLAN.md (scene MCP tools)
-last_updated: "2026-03-03T22:28:16Z"
-last_activity: 2026-03-03 — Completed 02-02-PLAN.md (scene MCP tools)
+status: executing
+stopped_at: Completed 02-03-PLAN.md (resource and script tools)
+last_updated: "2026-03-03T22:36:44.697Z"
+last_activity: 2026-03-03 — Completed 02-03-PLAN.md (resource and script tools)
 progress:
   total_phases: 4
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 6
-  completed_plans: 5
-  percent: 42
+  completed_plans: 6
+  percent: 100
 ---
 
 # Project State
@@ -26,28 +26,28 @@ See: .planning/PROJECT.md (updated 2026-03-03)
 ## Current Position
 
 Phase: 2 of 4 (Scene Intelligence)
-Plan: 2 of 3 in current phase -- COMPLETE
+Plan: 3 of 3 in current phase -- COMPLETE
 Status: In Progress
-Last activity: 2026-03-03 — Completed 02-02-PLAN.md (scene MCP tools)
+Last activity: 2026-03-03 — Completed 02-03-PLAN.md (resource and script tools)
 
 Progress: [########░░] 42%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5
+- Total plans completed: 6
 - Average duration: 4min
-- Total execution time: 0.37 hours
+- Total execution time: 0.42 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-foundation | 3 | 14min | 5min |
-| 02-scene-intelligence | 2 | 8min | 4min |
+| 02-scene-intelligence | 3 | 11min | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (5min), 01-02 (5min), 01-03 (4min), 02-01 (4min), 02-02 (4min)
+- Last 5 plans: 01-02 (5min), 01-03 (4min), 02-01 (4min), 02-02 (4min), 02-03 (3min)
 - Trend: stable
 
 *Updated after each plan completion*
@@ -77,6 +77,9 @@ Recent decisions affecting current work:
 - [02-02]: Read operations use TypeScript parser (fast); write operations use Godot headless (correct types)
 - [02-02]: Added ensure_res_prefix helper for DRY res:// path handling in GDScript
 - [02-02]: Value type hints optional with string pass-through default for complex Godot values
+- [Phase 02]: read_resource uses TypeScript parser (fast); create_resource uses Godot headless (correct types) -- same read/write split as scene tools
+- [Phase 02]: create_resource validates ClassDB.class_exists + is_parent_class before instantiation for clear error messages
+- [Phase 02]: validate_scripts extracts JSON from mixed Godot output by finding first line starting with '{'
 
 ### Pending Todos
 
@@ -90,6 +93,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-03
-Stopped at: Completed 02-02-PLAN.md (scene MCP tools)
+Last session: 2026-03-03T22:36:44.695Z
+Stopped at: Completed 02-03-PLAN.md (resource and script tools)
 Resume file: None
