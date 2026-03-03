@@ -1,0 +1,13 @@
+[gd_resource type="StandardMaterial3D" load_steps=2 format=3 uid="uid://mat123"]
+
+[ext_resource type="Texture2D" uid="uid://tex456" path="res://textures/brick.png" id="1_tex"]
+
+[sub_resource type="CompressedTexture2D" id="CompressedTexture2D_abc"]
+load_path = "res://textures/brick.png.import"
+
+[resource]
+albedo_color = Color(1, 0.64, 0.31, 1)
+albedo_texture = ExtResource("1_tex")
+metallic = 0.5
+roughness = 0.8
+normal_enabled = true

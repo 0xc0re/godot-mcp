@@ -1,0 +1,23 @@
+[gd_scene load_steps=4 format=3 uid="uid://cecaux1sm7mo0"]
+
+[ext_resource type="Script" uid="uid://abc123" path="res://player.gd" id="1_abc"]
+[ext_resource type="PackedScene" uid="uid://def456" path="res://enemy.tscn" id="2_def"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_xyz"]
+albedo_color = Color(1, 0.64, 0.31, 1)
+metallic = 0.5
+
+[node name="GameWorld" type="Node3D"]
+
+[node name="Player" type="CharacterBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+script = ExtResource("1_abc")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Player"]
+shape = SubResource("SphereShape3D_tj6p1")
+
+[node name="Camera3D" type="Camera3D" parent="Player/CollisionShape3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, 5)
+fov = 75.0
+
+[connection signal="body_entered" from="Player" to="." method="_on_body_entered"]
