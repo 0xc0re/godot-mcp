@@ -8,7 +8,7 @@ import { join } from 'path';
 import { existsSync } from 'fs';
 import { spawn } from 'child_process';
 import type { ServerContext } from '../types.js';
-import { validatePath } from '../godot.js';
+import { validatePath, trackProcess } from '../godot.js';
 import { toolError } from '../errors.js';
 
 const DEBUG_MODE: boolean = process.env.DEBUG === 'true';
@@ -47,12 +47,12 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
         }
 
         logDebug(`Launching Godot editor for project: ${project_path}`);
-        const proc = spawn(ctx.godotPath, ['-e', '--path', project_path], {
-          stdio: 'pipe',
-        });
-
-        ctx.trackedProcesses.add(proc);
-        proc.once('exit', () => ctx.trackedProcesses.delete(proc));
+        const proc = trackProcess(
+          ctx,
+          spawn(ctx.godotPath, ['-e', '--path', project_path], {
+            stdio: 'pipe',
+          }),
+        );
 
         proc.on('error', (err: Error) => {
           console.error('Failed to start Godot editor:', err);
@@ -117,11 +117,12 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
         }
 
         logDebug(`Running Godot project: ${project_path}`);
-        const proc = spawn(ctx.godotPath, cmdArgs, { stdio: 'pipe' });
+        const proc = trackProcess(
+          ctx,
+          spawn(ctx.godotPath, cmdArgs, { stdio: 'pipe' }),
+        );
         const output: string[] = [];
         const errors: string[] = [];
-
-        ctx.trackedProcesses.add(proc);
 
         proc.stdout?.on('data', (data: Buffer) => {
           const lines = data.toString().split('\n');
@@ -141,7 +142,6 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
 
         proc.on('exit', (code: number | null) => {
           logDebug(`Godot process exited with code ${code}`);
-          ctx.trackedProcesses.delete(proc);
           if (ctx.activeProcess && ctx.activeProcess.process === proc) {
             ctx.activeProcess = null;
           }
@@ -149,7 +149,6 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
 
         proc.on('error', (err: Error) => {
           console.error('Failed to start Godot process:', err);
-          ctx.trackedProcesses.delete(proc);
           if (ctx.activeProcess && ctx.activeProcess.process === proc) {
             ctx.activeProcess = null;
           }

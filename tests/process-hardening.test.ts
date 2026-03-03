@@ -4,6 +4,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
+import type { ChildProcess } from 'child_process';
+import type { ServerContext } from '../src/types.js';
 
 // Mock child_process before importing the module under test
 vi.mock('child_process', () => {
@@ -22,6 +24,17 @@ vi.mock('child_process', () => {
     spawn: vi.fn(),
   };
 });
+
+/** Helper to create a minimal ServerContext for testing */
+function createTestContext(): ServerContext {
+  return {
+    godotPath: '/usr/bin/godot',
+    operationsScriptPath: '/path/to/script.gd',
+    activeProcess: null,
+    trackedProcesses: new Set<ChildProcess>(),
+    validatedPaths: new Map<string, boolean>(),
+  };
+}
 
 describe('execGodot process hardening', () => {
   beforeEach(() => {
@@ -72,15 +85,8 @@ describe('executeOperation process hardening', () => {
   it('passes maxBuffer and timeout to execFileAsync', async () => {
     const { execFile } = await import('child_process');
     const { executeOperation } = await import('../src/godot.js');
-    const { ChildProcess } = await import('child_process');
 
-    const ctx = {
-      godotPath: '/usr/bin/godot',
-      operationsScriptPath: '/path/to/script.gd',
-      activeProcess: null,
-      trackedProcesses: new Set() as Set<InstanceType<typeof ChildProcess>>,
-      validatedPaths: new Map<string, boolean>(),
-    };
+    const ctx = createTestContext();
 
     await executeOperation(ctx, '/project', 'test_op', { key: 'value' });
 
@@ -104,84 +110,47 @@ describe('trackProcess', () => {
 
   it('adds process to trackedProcesses set', async () => {
     const { trackProcess } = await import('../src/godot.js');
-    const { ChildProcess } = await import('child_process');
 
-    const trackedProcesses = new Set() as Set<InstanceType<typeof ChildProcess>>;
-    const ctx = {
-      godotPath: '/usr/bin/godot',
-      operationsScriptPath: '/path/to/script.gd',
-      activeProcess: null,
-      trackedProcesses,
-      validatedPaths: new Map<string, boolean>(),
-    };
-
-    // Create a mock process using EventEmitter
-    const mockProc = new EventEmitter() as unknown as InstanceType<typeof ChildProcess>;
+    const ctx = createTestContext();
+    const mockProc = new EventEmitter() as unknown as ChildProcess;
 
     trackProcess(ctx, mockProc);
-    expect(trackedProcesses.has(mockProc)).toBe(true);
+    expect(ctx.trackedProcesses.has(mockProc)).toBe(true);
   });
 
   it('removes process from set on exit event', async () => {
     const { trackProcess } = await import('../src/godot.js');
-    const { ChildProcess } = await import('child_process');
 
-    const trackedProcesses = new Set() as Set<InstanceType<typeof ChildProcess>>;
-    const ctx = {
-      godotPath: '/usr/bin/godot',
-      operationsScriptPath: '/path/to/script.gd',
-      activeProcess: null,
-      trackedProcesses,
-      validatedPaths: new Map<string, boolean>(),
-    };
-
-    const mockProc = new EventEmitter() as unknown as InstanceType<typeof ChildProcess>;
+    const ctx = createTestContext();
+    const mockProc = new EventEmitter() as unknown as ChildProcess;
 
     trackProcess(ctx, mockProc);
-    expect(trackedProcesses.has(mockProc)).toBe(true);
+    expect(ctx.trackedProcesses.has(mockProc)).toBe(true);
 
     // Emit exit event
     mockProc.emit('exit', 0, null);
-    expect(trackedProcesses.has(mockProc)).toBe(false);
+    expect(ctx.trackedProcesses.has(mockProc)).toBe(false);
   });
 
   it('removes process from set on error event', async () => {
     const { trackProcess } = await import('../src/godot.js');
-    const { ChildProcess } = await import('child_process');
 
-    const trackedProcesses = new Set() as Set<InstanceType<typeof ChildProcess>>;
-    const ctx = {
-      godotPath: '/usr/bin/godot',
-      operationsScriptPath: '/path/to/script.gd',
-      activeProcess: null,
-      trackedProcesses,
-      validatedPaths: new Map<string, boolean>(),
-    };
-
-    const mockProc = new EventEmitter() as unknown as InstanceType<typeof ChildProcess>;
+    const ctx = createTestContext();
+    const mockProc = new EventEmitter() as unknown as ChildProcess;
 
     trackProcess(ctx, mockProc);
-    expect(trackedProcesses.has(mockProc)).toBe(true);
+    expect(ctx.trackedProcesses.has(mockProc)).toBe(true);
 
     // Emit error event
     mockProc.emit('error', new Error('test error'));
-    expect(trackedProcesses.has(mockProc)).toBe(false);
+    expect(ctx.trackedProcesses.has(mockProc)).toBe(false);
   });
 
   it('returns the process for chaining', async () => {
     const { trackProcess } = await import('../src/godot.js');
-    const { ChildProcess } = await import('child_process');
 
-    const trackedProcesses = new Set() as Set<InstanceType<typeof ChildProcess>>;
-    const ctx = {
-      godotPath: '/usr/bin/godot',
-      operationsScriptPath: '/path/to/script.gd',
-      activeProcess: null,
-      trackedProcesses,
-      validatedPaths: new Map<string, boolean>(),
-    };
-
-    const mockProc = new EventEmitter() as unknown as InstanceType<typeof ChildProcess>;
+    const ctx = createTestContext();
+    const mockProc = new EventEmitter() as unknown as ChildProcess;
 
     const result = trackProcess(ctx, mockProc);
     expect(result).toBe(mockProc);

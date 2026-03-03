@@ -6,12 +6,18 @@
  */
 
 import { existsSync } from 'fs';
-import { execFile } from 'child_process';
+import { execFile, type ChildProcess } from 'child_process';
 import { normalize } from 'path';
 import { promisify } from 'util';
 import type { ServerContext, OperationParams } from './types.js';
 
 const execFileAsync = promisify(execFile);
+
+/** 10 MB max buffer for Godot process output */
+const MAX_BUFFER = 10 * 1024 * 1024;
+
+/** 30 second timeout for Godot process execution */
+const EXEC_TIMEOUT = 30_000;
 
 // Check if debug mode is enabled
 const DEBUG_MODE: boolean = process.env.DEBUG === 'true';
@@ -144,13 +150,31 @@ export async function detectGodotPath(
 
 /**
  * Execute a simple Godot command (e.g. --version).
+ *
+ * Hardened with maxBuffer (10MB) and timeout (30s) to prevent
+ * crashes from large output and runaway processes.
  */
 export async function execGodot(
   godotPath: string,
   args: string[],
 ): Promise<{ stdout: string; stderr: string }> {
-  const { stdout, stderr } = await execFileAsync(godotPath, args);
-  return { stdout: stdout ?? '', stderr: stderr ?? '' };
+  try {
+    const { stdout, stderr } = await execFileAsync(godotPath, args, {
+      maxBuffer: MAX_BUFFER,
+      timeout: EXEC_TIMEOUT,
+    });
+    return { stdout: stdout ?? '', stderr: stderr ?? '' };
+  } catch (error: unknown) {
+    if (error instanceof Error && 'stdout' in error && 'stderr' in error) {
+      const execError = error as Error & { stdout: string; stderr: string; killed?: boolean };
+      if (execError.killed) {
+        throw new Error('Godot process timed out after 30 seconds');
+      }
+      // Non-zero exit code still has output
+      return { stdout: execError.stdout ?? '', stderr: execError.stderr ?? '' };
+    }
+    throw error;
+  }
 }
 
 /**
@@ -211,11 +235,17 @@ export async function executeOperation(
   logDebug(`Executing: ${ctx.godotPath} ${args.join(' ')}`);
 
   try {
-    const { stdout, stderr } = await execFileAsync(ctx.godotPath, args);
+    const { stdout, stderr } = await execFileAsync(ctx.godotPath, args, {
+      maxBuffer: MAX_BUFFER,
+      timeout: EXEC_TIMEOUT,
+    });
     return { stdout: stdout ?? '', stderr: stderr ?? '' };
   } catch (error: unknown) {
     if (error instanceof Error && 'stdout' in error && 'stderr' in error) {
-      const execError = error as Error & { stdout: string; stderr: string };
+      const execError = error as Error & { stdout: string; stderr: string; killed?: boolean };
+      if (execError.killed) {
+        throw new Error('Godot operation timed out after 30 seconds');
+      }
       return {
         stdout: execError.stdout ?? '',
         stderr: execError.stderr ?? '',
@@ -223,6 +253,20 @@ export async function executeOperation(
     }
     throw error;
   }
+}
+
+/**
+ * Track a spawned child process for cleanup on server shutdown.
+ *
+ * Adds the process to ctx.trackedProcesses and registers exit/error
+ * listeners to automatically remove it when it terminates.
+ * Returns the process for chaining.
+ */
+export function trackProcess(ctx: ServerContext, proc: ChildProcess): ChildProcess {
+  ctx.trackedProcesses.add(proc);
+  proc.once('exit', () => ctx.trackedProcesses.delete(proc));
+  proc.once('error', () => ctx.trackedProcesses.delete(proc));
+  return proc;
 }
 
 /**

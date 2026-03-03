@@ -29,8 +29,9 @@ registerProjectTools(server, ctx);
 registerSceneTools(server, ctx);
 registerUidTools(server, ctx);
 
-// Cleanup on exit
-const cleanup = async () => {
+// Graceful shutdown: kill all tracked processes, close server
+const shutdown = async () => {
+  console.error('[SERVER] Shutting down...');
   if (ctx.activeProcess) {
     ctx.activeProcess.process.kill();
     ctx.activeProcess = null;
@@ -45,7 +46,8 @@ const cleanup = async () => {
   process.exit(0);
 };
 
-process.on('SIGINT', cleanup);
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
 
 // Connect transport and start
 const transport = new StdioServerTransport();
