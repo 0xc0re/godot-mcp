@@ -10,7 +10,9 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createServerContext } from './server.js';
 import { registerEditorTools } from './tools/editor.js';
 import { registerProjectTools } from './tools/project.js';
+import { registerResourceTools } from './tools/resource.js';
 import { registerSceneTools } from './tools/scene.js';
+import { registerScriptTools } from './tools/script.js';
 import { registerUidTools } from './tools/uid.js';
 
 const server = new McpServer(
@@ -26,7 +28,9 @@ const ctx = await createServerContext();
 // Register all tool domains (must happen before connect)
 registerEditorTools(server, ctx);
 registerProjectTools(server, ctx);
+registerResourceTools(server, ctx);
 registerSceneTools(server, ctx);
+registerScriptTools(server, ctx);
 registerUidTools(server, ctx);
 
 // Graceful shutdown: kill all tracked processes, close server
