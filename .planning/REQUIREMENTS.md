@@ -78,34 +78,34 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| FOUN-01 | TBD | Pending |
-| FOUN-02 | TBD | Pending |
-| FOUN-03 | TBD | Pending |
-| FOUN-04 | TBD | Pending |
-| FOUN-05 | TBD | Pending |
-| FOUN-06 | TBD | Pending |
-| FOUN-07 | TBD | Pending |
-| FOUN-08 | TBD | Pending |
-| SCEN-01 | TBD | Pending |
-| SCEN-02 | TBD | Pending |
-| SCEN-03 | TBD | Pending |
-| SCEN-04 | TBD | Pending |
-| SCEN-05 | TBD | Pending |
-| SCEN-06 | TBD | Pending |
-| SCRI-01 | TBD | Pending |
-| SCRI-02 | TBD | Pending |
-| SCRI-03 | TBD | Pending |
-| SCRI-04 | TBD | Pending |
-| PROJ-01 | TBD | Pending |
-| PROJ-02 | TBD | Pending |
-| PROJ-03 | TBD | Pending |
-| RUNT-01 | TBD | Pending |
+| FOUN-01 | Phase 1 | Pending |
+| FOUN-02 | Phase 1 | Pending |
+| FOUN-03 | Phase 1 | Pending |
+| FOUN-04 | Phase 1 | Pending |
+| FOUN-05 | Phase 1 | Pending |
+| FOUN-06 | Phase 1 | Pending |
+| FOUN-07 | Phase 1 | Pending |
+| FOUN-08 | Phase 1 | Pending |
+| SCEN-01 | Phase 2 | Pending |
+| SCEN-02 | Phase 2 | Pending |
+| SCEN-03 | Phase 2 | Pending |
+| SCEN-04 | Phase 2 | Pending |
+| SCEN-05 | Phase 2 | Pending |
+| SCEN-06 | Phase 2 | Pending |
+| SCRI-01 | Phase 2 | Pending |
+| SCRI-02 | Phase 3 | Pending |
+| SCRI-03 | Phase 4 | Pending |
+| SCRI-04 | Phase 3 | Pending |
+| PROJ-01 | Phase 3 | Pending |
+| PROJ-02 | Phase 3 | Pending |
+| PROJ-03 | Phase 3 | Pending |
+| RUNT-01 | Phase 4 | Pending |
 
 **Coverage:**
 - v1 requirements: 22 total
-- Mapped to phases: 0
-- Unmapped: 22 ⚠️
+- Mapped to phases: 22
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-03-03*
-*Last updated: 2026-03-03 after initial definition*
+*Last updated: 2026-03-03 after roadmap creation*
