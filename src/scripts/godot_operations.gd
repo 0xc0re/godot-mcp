@@ -77,6 +77,10 @@ func _init():
             remove_node(params)
         "attach_script":
             attach_script(params)
+        "create_resource":
+            create_resource(params)
+        "validate_scripts":
+            validate_scripts(params)
         _:
             log_error("Unknown operation: " + operation)
             quit(1)
@@ -1463,3 +1467,103 @@ func attach_script(params):
         "script": params.script_path
     }
     print(JSON.stringify(result_json))
+
+# Create a new resource file (.tres) with specified type and properties
+func create_resource(params):
+    var resource_type = params.resource_type
+    var output_path = ensure_res_prefix(params.output_path)
+
+    log_info("Creating resource of type: " + resource_type + " at: " + output_path)
+
+    # Validate the resource type exists and is a Resource subclass
+    if not ClassDB.class_exists(resource_type):
+        log_error("Unknown resource type: " + resource_type)
+        quit(1)
+
+    if not ClassDB.is_parent_class(resource_type, "Resource"):
+        log_error("Type is not a Resource: " + resource_type)
+        quit(1)
+
+    var resource = ClassDB.instantiate(resource_type)
+    if resource == null:
+        log_error("Failed to instantiate resource type: " + resource_type)
+        quit(1)
+
+    # Set properties from params
+    if params.has("properties"):
+        var property_types = params.get("property_types", {})
+        for prop_name in params.properties:
+            var value = convert_json_to_godot_type(
+                params.properties[prop_name],
+                property_types.get(prop_name, "")
+            )
+            resource.set(prop_name, value)
+
+    # Ensure the output directory exists
+    var dir_path = output_path.get_base_dir()
+    if not DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(dir_path)):
+        var dir = DirAccess.open("res://")
+        if dir:
+            var relative_dir = dir_path.substr(6)  # Remove "res://" prefix
+            if not relative_dir.is_empty():
+                dir.make_dir_recursive(relative_dir)
+
+    var error = ResourceSaver.save(resource, output_path)
+    if error == OK:
+        print(JSON.stringify({"success": true, "path": output_path, "type": resource_type}))
+    else:
+        log_error("Failed to save resource: " + str(error))
+        quit(1)
+
+# Batch-validate all GDScript files in a project for parse errors
+func validate_scripts(params):
+    var base_path = params.get("path_filter", "res://")
+    if base_path == "":
+        base_path = "res://"
+    if not base_path.begins_with("res://"):
+        base_path = "res://" + base_path
+
+    log_info("Validating scripts in: " + base_path)
+
+    var gd_files = find_gd_files(base_path)
+    var results = []
+    var error_count = 0
+
+    for file_path in gd_files:
+        var script = load(file_path)
+        if script == null:
+            results.append({"file": file_path, "valid": false, "error": "Failed to load script"})
+            error_count += 1
+            continue
+        var reload_result = script.reload()
+        if reload_result != OK:
+            results.append({"file": file_path, "valid": false, "error": "Parse error (code: " + str(reload_result) + ")"})
+            error_count += 1
+        else:
+            results.append({"file": file_path, "valid": true})
+
+    print(JSON.stringify({
+        "results": results,
+        "total": gd_files.size(),
+        "errors": error_count,
+        "valid": gd_files.size() - error_count
+    }))
+
+# Recursively find all .gd files under a base path
+func find_gd_files(base_path: String) -> Array:
+    var files = []
+    var dir = DirAccess.open(base_path)
+    if dir == null:
+        return files
+    dir.list_dir_begin()
+    var file_name = dir.get_next()
+    while file_name != "":
+        var full_path = base_path.path_join(file_name)
+        if dir.current_is_dir():
+            if file_name != "." and file_name != ".." and file_name != ".godot":
+                files.append_array(find_gd_files(full_path))
+        elif file_name.ends_with(".gd"):
+            files.append(full_path)
+        file_name = dir.get_next()
+    dir.list_dir_end()
+    return files
