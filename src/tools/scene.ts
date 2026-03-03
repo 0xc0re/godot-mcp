@@ -1,14 +1,16 @@
 /**
- * Scene tool domain: create_scene, add_node, load_sprite, export_mesh_library, save_scene
+ * Scene tool domain: create_scene, add_node, load_sprite, export_mesh_library, save_scene,
+ * read_scene, modify_node_property, remove_node, attach_script
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { join } from 'path';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import type { ServerContext } from '../types.js';
 import { executeOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
+import { parseScene } from '../parsers/tscn-parser.js';
 
 export function registerSceneTools(server: McpServer, ctx: ServerContext): void {
   // Tool 8: create_scene
@@ -451,6 +453,350 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         return toolError(`Failed to save scene: ${errorMessage}`, [
+          'Ensure Godot is installed correctly',
+          'Check if the GODOT_PATH environment variable is set correctly',
+          'Verify the project path is accessible',
+        ]);
+      }
+    },
+  );
+
+  // Tool 13: read_scene
+  server.registerTool(
+    'read_scene',
+    {
+      title: 'Read Scene',
+      description:
+        'Read a Godot scene file and return its node hierarchy, resources, and connections as structured JSON',
+      inputSchema: {
+        project_path: z.string().describe('Path to the Godot project directory'),
+        scene_path: z
+          .string()
+          .describe(
+            'Path to the scene file relative to project (e.g. "scenes/main.tscn")',
+          ),
+      },
+    },
+    async ({ project_path, scene_path }) => {
+      if (!validatePath(project_path) || !validatePath(scene_path)) {
+        return toolError('Invalid path', [
+          'Provide valid paths without ".." or other potentially unsafe characters',
+        ]);
+      }
+
+      try {
+        const projectFile = join(project_path, 'project.godot');
+        if (!existsSync(projectFile)) {
+          return toolError(`Not a valid Godot project: ${project_path}`, [
+            'Ensure the path points to a directory containing a project.godot file',
+            'Use list_projects to find valid Godot projects',
+          ]);
+        }
+
+        const sceneFilePath = join(project_path, scene_path);
+        if (!existsSync(sceneFilePath)) {
+          return toolError(`Scene file does not exist: ${scene_path}`, [
+            'Ensure the scene path is correct',
+            'Use create_scene to create a new scene first',
+          ]);
+        }
+
+        const content = readFileSync(sceneFilePath, 'utf-8');
+        const parsed = parseScene(content);
+
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(parsed, null, 2),
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
+        return toolError(`Failed to read scene: ${errorMessage}`, [
+          'Ensure the scene file is a valid .tscn file',
+          'Check if the file is not corrupted',
+          'Verify the scene path is correct',
+        ]);
+      }
+    },
+  );
+
+  // Tool 14: modify_node_property
+  server.registerTool(
+    'modify_node_property',
+    {
+      title: 'Modify Node Property',
+      description:
+        'Modify a property on a node in a Godot scene (position, scale, visibility, custom properties)',
+      inputSchema: {
+        project_path: z.string().describe('Path to the Godot project directory'),
+        scene_path: z
+          .string()
+          .describe('Path to the scene file relative to project'),
+        node_path: z
+          .string()
+          .describe(
+            'Path to the target node (e.g. "root/Player" or "root/Player/Sprite2D")',
+          ),
+        property_name: z
+          .string()
+          .describe(
+            'Name of the property to modify (e.g. "position", "scale", "visible")',
+          ),
+        value: z
+          .any()
+          .describe(
+            'New value for the property (JSON object for Vector2/Vector3/Color, primitive for others)',
+          ),
+        value_type: z
+          .string()
+          .optional()
+          .describe(
+            'Type hint for complex values: "Vector2", "Vector3", "Color", "bool", "int", "float". Omit for strings.',
+          ),
+      },
+    },
+    async ({
+      project_path,
+      scene_path,
+      node_path,
+      property_name,
+      value,
+      value_type,
+    }) => {
+      if (!validatePath(project_path) || !validatePath(scene_path)) {
+        return toolError('Invalid path', [
+          'Provide valid paths without ".." or other potentially unsafe characters',
+        ]);
+      }
+
+      try {
+        const projectFile = join(project_path, 'project.godot');
+        if (!existsSync(projectFile)) {
+          return toolError(`Not a valid Godot project: ${project_path}`, [
+            'Ensure the path points to a directory containing a project.godot file',
+            'Use list_projects to find valid Godot projects',
+          ]);
+        }
+
+        const sceneFilePath = join(project_path, scene_path);
+        if (!existsSync(sceneFilePath)) {
+          return toolError(`Scene file does not exist: ${scene_path}`, [
+            'Ensure the scene path is correct',
+            'Use create_scene to create a new scene first',
+          ]);
+        }
+
+        const params = {
+          scenePath: scene_path,
+          nodePath: node_path,
+          propertyName: property_name,
+          value,
+          valueType: value_type || '',
+        };
+
+        const { stdout, stderr } = await executeOperation(
+          ctx,
+          project_path,
+          'modify_node_property',
+          params,
+        );
+
+        if (stderr && stderr.includes('Failed to')) {
+          return toolError(`Failed to modify node property: ${stderr}`, [
+            'Check if the node path exists in the scene',
+            'Verify the property name is valid for this node type',
+            'Ensure the value type matches the property type',
+          ]);
+        }
+
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Property '${property_name}' modified on node '${node_path}'\n\nOutput: ${stdout}`,
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
+        return toolError(`Failed to modify node property: ${errorMessage}`, [
+          'Ensure Godot is installed correctly',
+          'Check if the GODOT_PATH environment variable is set correctly',
+          'Verify the project path is accessible',
+        ]);
+      }
+    },
+  );
+
+  // Tool 15: remove_node
+  server.registerTool(
+    'remove_node',
+    {
+      title: 'Remove Node',
+      description: 'Remove a node from a Godot scene by its path',
+      inputSchema: {
+        project_path: z.string().describe('Path to the Godot project directory'),
+        scene_path: z
+          .string()
+          .describe('Path to the scene file relative to project'),
+        node_path: z
+          .string()
+          .describe(
+            'Path to the node to remove (e.g. "root/EnemySpawner")',
+          ),
+      },
+    },
+    async ({ project_path, scene_path, node_path }) => {
+      if (!validatePath(project_path) || !validatePath(scene_path)) {
+        return toolError('Invalid path', [
+          'Provide valid paths without ".." or other potentially unsafe characters',
+        ]);
+      }
+
+      try {
+        const projectFile = join(project_path, 'project.godot');
+        if (!existsSync(projectFile)) {
+          return toolError(`Not a valid Godot project: ${project_path}`, [
+            'Ensure the path points to a directory containing a project.godot file',
+            'Use list_projects to find valid Godot projects',
+          ]);
+        }
+
+        const sceneFilePath = join(project_path, scene_path);
+        if (!existsSync(sceneFilePath)) {
+          return toolError(`Scene file does not exist: ${scene_path}`, [
+            'Ensure the scene path is correct',
+            'Use create_scene to create a new scene first',
+          ]);
+        }
+
+        const params = {
+          scenePath: scene_path,
+          nodePath: node_path,
+        };
+
+        const { stdout, stderr } = await executeOperation(
+          ctx,
+          project_path,
+          'remove_node',
+          params,
+        );
+
+        if (stderr && stderr.includes('Failed to')) {
+          return toolError(`Failed to remove node: ${stderr}`, [
+            'Check if the node path exists in the scene',
+            'The root node cannot be removed',
+            'Verify the scene file is valid',
+          ]);
+        }
+
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Node '${node_path}' removed successfully\n\nOutput: ${stdout}`,
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
+        return toolError(`Failed to remove node: ${errorMessage}`, [
+          'Ensure Godot is installed correctly',
+          'Check if the GODOT_PATH environment variable is set correctly',
+          'Verify the project path is accessible',
+        ]);
+      }
+    },
+  );
+
+  // Tool 16: attach_script
+  server.registerTool(
+    'attach_script',
+    {
+      title: 'Attach Script',
+      description: 'Attach a GDScript file to a node in a Godot scene',
+      inputSchema: {
+        project_path: z.string().describe('Path to the Godot project directory'),
+        scene_path: z
+          .string()
+          .describe('Path to the scene file relative to project'),
+        node_path: z
+          .string()
+          .describe('Path to the target node (e.g. "root/Player")'),
+        script_path: z
+          .string()
+          .describe(
+            'Path to the GDScript file relative to project (e.g. "scripts/player.gd")',
+          ),
+      },
+    },
+    async ({ project_path, scene_path, node_path, script_path }) => {
+      if (
+        !validatePath(project_path) ||
+        !validatePath(scene_path) ||
+        !validatePath(script_path)
+      ) {
+        return toolError('Invalid path', [
+          'Provide valid paths without ".." or other potentially unsafe characters',
+        ]);
+      }
+
+      try {
+        const projectFile = join(project_path, 'project.godot');
+        if (!existsSync(projectFile)) {
+          return toolError(`Not a valid Godot project: ${project_path}`, [
+            'Ensure the path points to a directory containing a project.godot file',
+            'Use list_projects to find valid Godot projects',
+          ]);
+        }
+
+        const sceneFilePath = join(project_path, scene_path);
+        if (!existsSync(sceneFilePath)) {
+          return toolError(`Scene file does not exist: ${scene_path}`, [
+            'Ensure the scene path is correct',
+            'Use create_scene to create a new scene first',
+          ]);
+        }
+
+        const params = {
+          scenePath: scene_path,
+          nodePath: node_path,
+          scriptPath: script_path,
+        };
+
+        const { stdout, stderr } = await executeOperation(
+          ctx,
+          project_path,
+          'attach_script',
+          params,
+        );
+
+        if (stderr && stderr.includes('Failed to')) {
+          return toolError(`Failed to attach script: ${stderr}`, [
+            'Check if the node path exists in the scene',
+            'Ensure the script file exists and is valid GDScript',
+            'Verify the script path is correct',
+          ]);
+        }
+
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Script '${script_path}' attached to node '${node_path}'\n\nOutput: ${stdout}`,
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
+        return toolError(`Failed to attach script: ${errorMessage}`, [
           'Ensure Godot is installed correctly',
           'Check if the GODOT_PATH environment variable is set correctly',
           'Verify the project path is accessible',
