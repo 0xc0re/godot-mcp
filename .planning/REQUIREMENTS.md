@@ -9,12 +9,12 @@ Requirements for v2.0 Enhancements milestone. Each maps to roadmap phases.
 
 ### Scene Composition
 
-- [ ] **COMP-01**: AI can connect a signal between two nodes in a scene (with CONNECT_PERSIST for .tscn serialization)
-- [ ] **COMP-02**: AI can disconnect an existing signal connection between two nodes in a scene
-- [ ] **COMP-03**: AI can add an instance of a .tscn scene as a child node in another scene (with proper set_owner for pack)
-- [ ] **COMP-04**: AI can set multiple properties on multiple nodes in a single operation (batch, one subprocess)
-- [ ] **COMP-05**: AI can add a node to one or more groups
-- [ ] **COMP-06**: AI can remove a node from a group
+- [x] **COMP-01**: AI can connect a signal between two nodes in a scene (with CONNECT_PERSIST for .tscn serialization)
+- [x] **COMP-02**: AI can disconnect an existing signal connection between two nodes in a scene
+- [x] **COMP-03**: AI can add an instance of a .tscn scene as a child node in another scene (with proper set_owner for pack)
+- [x] **COMP-04**: AI can set multiple properties on multiple nodes in a single operation (batch, one subprocess)
+- [x] **COMP-05**: AI can add a node to one or more groups
+- [x] **COMP-06**: AI can remove a node from a group
 
 ### Project Configuration
 
@@ -100,12 +100,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| COMP-01 | Phase 5 | Pending |
-| COMP-02 | Phase 5 | Pending |
-| COMP-03 | Phase 5 | Pending |
-| COMP-04 | Phase 5 | Pending |
-| COMP-05 | Phase 5 | Pending |
-| COMP-06 | Phase 5 | Pending |
+| COMP-01 | Phase 5 | Complete |
+| COMP-02 | Phase 5 | Complete |
+| COMP-03 | Phase 5 | Complete |
+| COMP-04 | Phase 5 | Complete |
+| COMP-05 | Phase 5 | Complete |
+| COMP-06 | Phase 5 | Complete |
 | CONF-01 | Phase 6 | Pending |
 | CONF-02 | Phase 6 | Pending |
 | CONF-03 | Phase 6 | Pending |
