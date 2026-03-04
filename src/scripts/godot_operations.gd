@@ -105,6 +105,14 @@ func _init():
             create_shader_material(params)
         "set_shader_params":
             set_shader_params(params)
+        "create_animation":
+            create_animation(params)
+        "create_animation_library":
+            create_animation_library(params)
+        "add_keyframes":
+            add_keyframes(params)
+        "assign_animation_library":
+            assign_animation_library(params)
         _:
             log_error("Unknown operation: " + operation)
             quit(1)
@@ -2175,3 +2183,214 @@ func set_shader_params(params):
         return
 
     print(JSON.stringify({"success": true, "path": material_path, "params_set": count}))
+
+# Create an Animation resource with value tracks and keyframes
+func create_animation(params):
+    var output_path = ensure_res_prefix(params.get("output_path", ""))
+    var length = float(params.get("length", 1.0))
+    var loop_mode_str = params.get("loop_mode", "none")
+    var step = float(params.get("step", 0.1))
+    var tracks = params.get("tracks", [])
+
+    if output_path == "res://":
+        log_error("Missing required parameter: output_path")
+        print(JSON.stringify({"success": false, "error": "Missing required parameter: output_path"}))
+        return
+
+    log_info("Creating animation: " + output_path)
+
+    var anim = Animation.new()
+    anim.length = length
+    anim.step = step
+
+    # Map loop mode string to Animation constant
+    match loop_mode_str:
+        "linear":
+            anim.loop_mode = Animation.LOOP_LINEAR
+        "pingpong":
+            anim.loop_mode = Animation.LOOP_PINGPONG
+        _:
+            anim.loop_mode = Animation.LOOP_NONE
+
+    # Add tracks and keyframes
+    for track in tracks:
+        var track_idx = anim.add_track(Animation.TYPE_VALUE)
+        anim.track_set_path(track_idx, track.get("path", ""))
+
+        var keyframes = track.get("keyframes", [])
+        for kf in keyframes:
+            var time = float(kf.get("time", 0.0))
+            var type_hint = kf.get("type", "")
+            var value = convert_json_to_godot_type(kf.get("value"), type_hint)
+            anim.track_insert_key(track_idx, time, value)
+
+    # Ensure output directory exists
+    var dir_path = output_path.get_base_dir()
+    if not DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(dir_path)):
+        var dir = DirAccess.open("res://")
+        if dir:
+            var relative_dir = dir_path.substr(6)  # Remove "res://" prefix
+            if not relative_dir.is_empty():
+                dir.make_dir_recursive(relative_dir)
+
+    var error = ResourceSaver.save(anim, output_path)
+    if error != OK:
+        log_error("Failed to save animation: " + str(error))
+        print(JSON.stringify({"success": false, "error": "Failed to save animation: " + str(error)}))
+        return
+
+    print(JSON.stringify({"success": true, "path": output_path, "track_count": anim.get_track_count()}))
+
+# Create an AnimationLibrary containing named animations
+func create_animation_library(params):
+    var output_path = ensure_res_prefix(params.get("output_path", ""))
+    var animations = params.get("animations", {})
+
+    if output_path == "res://":
+        log_error("Missing required parameter: output_path")
+        print(JSON.stringify({"success": false, "error": "Missing required parameter: output_path"}))
+        return
+
+    log_info("Creating animation library: " + output_path)
+
+    var library = AnimationLibrary.new()
+    var count = 0
+
+    for anim_name in animations:
+        var anim_path = ensure_res_prefix(animations[anim_name])
+        var anim = load(anim_path) as Animation
+        if anim == null:
+            log_error("Failed to load animation: " + anim_path)
+            print(JSON.stringify({"success": false, "error": "Failed to load animation: " + anim_path}))
+            return
+        library.add_animation(anim_name, anim)
+        count += 1
+
+    # Ensure output directory exists
+    var dir_path = output_path.get_base_dir()
+    if not DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(dir_path)):
+        var dir = DirAccess.open("res://")
+        if dir:
+            var relative_dir = dir_path.substr(6)  # Remove "res://" prefix
+            if not relative_dir.is_empty():
+                dir.make_dir_recursive(relative_dir)
+
+    var error = ResourceSaver.save(library, output_path)
+    if error != OK:
+        log_error("Failed to save animation library: " + str(error))
+        print(JSON.stringify({"success": false, "error": "Failed to save animation library: " + str(error)}))
+        return
+
+    print(JSON.stringify({"success": true, "path": output_path, "animation_count": count}))
+
+# Add keyframes to an existing animation track
+func add_keyframes(params):
+    var animation_path = ensure_res_prefix(params.get("animation_path", ""))
+    var track_index = params.get("track_index", -1)
+    var track_path = params.get("track_path", "")
+    var keyframes = params.get("keyframes", [])
+
+    if animation_path == "res://":
+        log_error("Missing required parameter: animation_path")
+        print(JSON.stringify({"success": false, "error": "Missing required parameter: animation_path"}))
+        return
+
+    log_info("Adding keyframes to animation: " + animation_path)
+
+    var anim = load(animation_path) as Animation
+    if anim == null:
+        log_error("Failed to load animation: " + animation_path)
+        print(JSON.stringify({"success": false, "error": "Failed to load animation: " + animation_path}))
+        return
+
+    # Resolve track index
+    var resolved_idx = int(track_index)
+    if resolved_idx < 0 and track_path != "":
+        # Search for track by path
+        for i in range(anim.get_track_count()):
+            if str(anim.track_get_path(i)) == track_path:
+                resolved_idx = i
+                break
+
+    if resolved_idx < 0 or resolved_idx >= anim.get_track_count():
+        log_error("Track not found. Index: " + str(track_index) + ", Path: " + track_path)
+        print(JSON.stringify({"success": false, "error": "Track not found. Index: " + str(track_index) + ", Path: " + track_path}))
+        return
+
+    # Insert keyframes
+    var count = 0
+    for kf in keyframes:
+        var time = float(kf.get("time", 0.0))
+        var type_hint = kf.get("type", "")
+        var value = convert_json_to_godot_type(kf.get("value"), type_hint)
+        anim.track_insert_key(resolved_idx, time, value)
+        count += 1
+
+    var error = ResourceSaver.save(anim, animation_path)
+    if error != OK:
+        log_error("Failed to save animation: " + str(error))
+        print(JSON.stringify({"success": false, "error": "Failed to save animation: " + str(error)}))
+        return
+
+    print(JSON.stringify({"success": true, "path": animation_path, "keyframes_added": count}))
+
+# Assign an AnimationLibrary to an AnimationPlayer node in a scene
+func assign_animation_library(params):
+    var scene_path = ensure_res_prefix(params.get("scene_path", ""))
+    var node_path = params.get("node_path", "")
+    var library_name = params.get("library_name", "")
+    var library_path = ensure_res_prefix(params.get("library_path", ""))
+
+    if scene_path == "res://" or library_path == "res://":
+        log_error("Missing required parameters: scene_path and library_path")
+        print(JSON.stringify({"success": false, "error": "Missing required parameters: scene_path and library_path"}))
+        return
+
+    log_info("Assigning animation library to scene: " + scene_path)
+
+    # Load the scene
+    var scene = load(scene_path)
+    if not scene:
+        log_error("Failed to load scene: " + scene_path)
+        print(JSON.stringify({"success": false, "error": "Failed to load scene: " + scene_path}))
+        return
+
+    var scene_root = scene.instantiate()
+
+    # Find the AnimationPlayer node
+    var target = find_node_by_path(scene_root, node_path)
+    if not target:
+        log_error("Node not found: " + node_path)
+        print(JSON.stringify({"success": false, "error": "Node not found: " + node_path}))
+        return
+
+    if not target is AnimationPlayer:
+        log_error("Target node is not an AnimationPlayer: " + node_path)
+        print(JSON.stringify({"success": false, "error": "Target node is not an AnimationPlayer: " + node_path}))
+        return
+
+    # Load the animation library
+    var library = load(library_path) as AnimationLibrary
+    if library == null:
+        log_error("Failed to load animation library: " + library_path)
+        print(JSON.stringify({"success": false, "error": "Failed to load animation library: " + library_path}))
+        return
+
+    # Add the library to the AnimationPlayer
+    target.add_animation_library(library_name, library)
+
+    # Pack and save scene
+    var packed_scene = PackedScene.new()
+    var result = packed_scene.pack(scene_root)
+    if result != OK:
+        log_error("Failed to pack scene after assigning animation library: " + str(result))
+        print(JSON.stringify({"success": false, "error": "Failed to pack scene: " + str(result)}))
+        return
+
+    var save_error = ResourceSaver.save(packed_scene, scene_path)
+    if save_error != OK:
+        log_error("Failed to save scene: " + str(save_error))
+        print(JSON.stringify({"success": false, "error": "Failed to save scene: " + str(save_error)}))
+        return
+
+    print(JSON.stringify({"success": true, "library_name": library_name, "scene_path": scene_path}))
