@@ -1,0 +1,296 @@
+/**
+ * Runtime inspection tool domain: inspect_scene_tree, inspect_node, inspect_group
+ *
+ * Uses file-polling IPC with runtime_helper.gd autoload to inspect a running
+ * Godot game's live scene tree, node properties, and group membership.
+ */
+
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+import { join } from 'path';
+import { existsSync, writeFileSync, readFileSync, unlinkSync } from 'fs';
+import type { ServerContext } from '../types.js';
+import { validatePath } from '../godot.js';
+import { toolError } from '../errors.js';
+
+/** Relative path within project to the trigger file */
+const TRIGGER_PATH_SUFFIX = '.godot/runtime_trigger';
+
+/** Relative path within project to the result file */
+const OUTPUT_PATH_SUFFIX = '.godot/runtime_result.json';
+
+/** Timeout in ms waiting for the runtime helper to respond */
+const POLL_TIMEOUT_MS = 5000;
+
+/** Polling interval in ms to check for result file */
+const POLL_INTERVAL_MS = 100;
+
+/**
+ * Poll for the runtime_helper.gd result file.
+ *
+ * Deletes any stale output file before the caller writes the trigger.
+ * After the trigger is written externally, this polls for the output file.
+ * On success, reads and parses the JSON, then cleans up both files.
+ */
+async function pollForResult(
+  projectPath: string,
+): Promise<Record<string, unknown>> {
+  const outputPath = join(projectPath, OUTPUT_PATH_SUFFIX);
+  const triggerPath = join(projectPath, TRIGGER_PATH_SUFFIX);
+
+  // Delete stale output file to prevent reading old results
+  try {
+    if (existsSync(outputPath)) {
+      unlinkSync(outputPath);
+    }
+  } catch {
+    // Ignore cleanup errors
+  }
+
+  // Poll for the response file
+  const startTime = Date.now();
+  await new Promise<void>((resolve, reject) => {
+    const check = () => {
+      if (existsSync(outputPath)) {
+        resolve();
+        return;
+      }
+      if (Date.now() - startTime >= POLL_TIMEOUT_MS) {
+        reject(new Error('timeout'));
+        return;
+      }
+      setTimeout(check, POLL_INTERVAL_MS);
+    };
+    setTimeout(check, POLL_INTERVAL_MS);
+  });
+
+  // Read and parse the result
+  const resultJson = readFileSync(outputPath, 'utf-8');
+  const result = JSON.parse(resultJson) as Record<string, unknown>;
+
+  // Cleanup both files
+  try {
+    unlinkSync(outputPath);
+  } catch {
+    // Ignore cleanup errors
+  }
+  try {
+    unlinkSync(triggerPath);
+  } catch {
+    // Ignore cleanup errors
+  }
+
+  return result;
+}
+
+/**
+ * Register runtime inspection tools on the MCP server.
+ */
+export function registerRuntimeTools(server: McpServer, ctx: ServerContext): void {
+  // Tool 1: inspect_scene_tree
+  server.registerTool(
+    'inspect_scene_tree',
+    {
+      title: 'Inspect Scene Tree',
+      description:
+        'Get a snapshot of the live scene tree from a running Godot project. ' +
+        'Returns node names, types, paths, and hierarchy as JSON. ' +
+        'The RuntimeHelper autoload (src/scripts/runtime_helper.gd) must be added to the Godot project.',
+      inputSchema: {
+        project_path: z.string().describe('Path to the Godot project directory'),
+      },
+    },
+    async ({ project_path }) => {
+      if (!validatePath(project_path)) {
+        return toolError('Invalid project path', [
+          'Provide a valid path without ".." or other potentially unsafe characters',
+        ]);
+      }
+
+      if (!ctx.activeProcess) {
+        return toolError('No active Godot process. Cannot inspect scene tree.', [
+          'Use run_project to start a Godot project first',
+          'Ensure the RuntimeHelper autoload is added to the project',
+        ]);
+      }
+
+      const triggerPath = join(project_path, TRIGGER_PATH_SUFFIX);
+
+      try {
+        // Write trigger file
+        writeFileSync(
+          triggerPath,
+          JSON.stringify({ command: 'scene_tree', params: {} }),
+        );
+
+        const result = await pollForResult(project_path);
+
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        if (error instanceof Error && error.message === 'timeout') {
+          return toolError(
+            'Scene tree inspection timed out. The result was not produced within 5 seconds.',
+            [
+              'Ensure the RuntimeHelper autoload is added to the Godot project',
+              'Verify the game is running and processing frames',
+              'Check that the .godot/ directory exists in the project',
+            ],
+          );
+        }
+
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        return toolError(`Failed to inspect scene tree: ${errorMessage}`, [
+          'Ensure the game is running via run_project',
+          'Verify the RuntimeHelper autoload is configured',
+        ]);
+      }
+    },
+  );
+
+  // Tool 2: inspect_node
+  server.registerTool(
+    'inspect_node',
+    {
+      title: 'Inspect Node',
+      description:
+        'Inspect property values for a specific node in the running scene tree. ' +
+        'Returns the node name, type, path, and a dictionary of property values. ' +
+        'The RuntimeHelper autoload (src/scripts/runtime_helper.gd) must be added to the Godot project.',
+      inputSchema: {
+        project_path: z.string().describe('Path to the Godot project directory'),
+        node_path: z.string().describe('Path to the node, e.g. /root/Main/Player'),
+      },
+    },
+    async ({ project_path, node_path }) => {
+      if (!validatePath(project_path)) {
+        return toolError('Invalid project path', [
+          'Provide a valid path without ".." or other potentially unsafe characters',
+        ]);
+      }
+
+      if (!ctx.activeProcess) {
+        return toolError('No active Godot process. Cannot inspect node.', [
+          'Use run_project to start a Godot project first',
+          'Ensure the RuntimeHelper autoload is added to the project',
+        ]);
+      }
+
+      const triggerPath = join(project_path, TRIGGER_PATH_SUFFIX);
+
+      try {
+        writeFileSync(
+          triggerPath,
+          JSON.stringify({
+            command: 'inspect_node',
+            params: { node_path },
+          }),
+        );
+
+        const result = await pollForResult(project_path);
+
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        if (error instanceof Error && error.message === 'timeout') {
+          return toolError(
+            'Node inspection timed out. The result was not produced within 5 seconds.',
+            [
+              'Ensure the RuntimeHelper autoload is added to the Godot project',
+              'Verify the game is running and processing frames',
+              'Check that the node path is correct',
+            ],
+          );
+        }
+
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        return toolError(`Failed to inspect node: ${errorMessage}`, [
+          'Ensure the game is running via run_project',
+          'Verify the RuntimeHelper autoload is configured',
+        ]);
+      }
+    },
+  );
+
+  // Tool 3: inspect_group
+  server.registerTool(
+    'inspect_group',
+    {
+      title: 'Inspect Group',
+      description:
+        'List all nodes in a specific group in the running scene tree. ' +
+        'Returns the group name, node count, and array of nodes with name, type, and path. ' +
+        'The RuntimeHelper autoload (src/scripts/runtime_helper.gd) must be added to the Godot project.',
+      inputSchema: {
+        project_path: z.string().describe('Path to the Godot project directory'),
+        group: z.string().describe('Group name to query'),
+      },
+    },
+    async ({ project_path, group }) => {
+      if (!validatePath(project_path)) {
+        return toolError('Invalid project path', [
+          'Provide a valid path without ".." or other potentially unsafe characters',
+        ]);
+      }
+
+      if (!ctx.activeProcess) {
+        return toolError('No active Godot process. Cannot inspect group.', [
+          'Use run_project to start a Godot project first',
+          'Ensure the RuntimeHelper autoload is added to the project',
+        ]);
+      }
+
+      const triggerPath = join(project_path, TRIGGER_PATH_SUFFIX);
+
+      try {
+        writeFileSync(
+          triggerPath,
+          JSON.stringify({
+            command: 'get_group',
+            params: { group },
+          }),
+        );
+
+        const result = await pollForResult(project_path);
+
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        if (error instanceof Error && error.message === 'timeout') {
+          return toolError(
+            'Group inspection timed out. The result was not produced within 5 seconds.',
+            [
+              'Ensure the RuntimeHelper autoload is added to the Godot project',
+              'Verify the game is running and processing frames',
+              'Check that the group name is correct',
+            ],
+          );
+        }
+
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        return toolError(`Failed to inspect group: ${errorMessage}`, [
+          'Ensure the game is running via run_project',
+          'Verify the RuntimeHelper autoload is configured',
+        ]);
+      }
+    },
+  );
+}
