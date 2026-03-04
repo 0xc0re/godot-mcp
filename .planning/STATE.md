@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.1
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-01-PLAN.md (LSP JSON-RPC message framing)
-last_updated: "2026-03-04T01:22:31.210Z"
-last_activity: 2026-03-04 — Completed 04-01-PLAN.md (LSP JSON-RPC message framing)
+stopped_at: Completed 04-02-PLAN.md (Screenshot capture tool)
+last_updated: "2026-03-04T01:23:23.274Z"
+last_activity: 2026-03-04 — Completed 04-02-PLAN.md (Screenshot capture tool)
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 12
-  completed_plans: 10
+  completed_plans: 11
   percent: 83
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-03-03)
 ## Current Position
 
 Phase: 4 of 4 (Diagnostics & Runtime)
-Plan: 1 of 3 in current phase -- COMPLETE
+Plan: 2 of 3 in current phase -- COMPLETE
 Status: In Progress
-Last activity: 2026-03-04 — Completed 04-01-PLAN.md (LSP JSON-RPC message framing)
+Last activity: 2026-03-04 — Completed 04-02-PLAN.md (Screenshot capture tool)
 
 Progress: [########░░] 83%
 
@@ -54,6 +54,7 @@ Progress: [########░░] 83%
 *Updated after each plan completion*
 | Phase 03 P03 | 2min | 2 tasks | 3 files |
 | Phase 04 P01 | 2min | 2 tasks | 2 files |
+| Phase 04 P02 | 3min | 1 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -96,6 +97,9 @@ Recent decisions affecting current work:
 - [Phase 04-01]: Used Buffer.byteLength for Content-Length (handles UTF-8 multi-byte characters correctly)
 - [Phase 04-01]: parseMessages returns remainder Buffer for TCP stream reassembly across data events
 - [Phase 04-01]: Constants extracted for HEADER_SEPARATOR and CONTENT_LENGTH_RE regex
+- [Phase 04-02]: Fixed project-relative paths (res://.godot/) for trigger/output -- no CLI args needed
+- [Phase 04-02]: 800KB threshold for resize (conservative under Claude Desktop 1MB limit)
+- [Phase 04-02]: Godot headless resize to 960x540 via spawned GDScript (reuses ctx.godotPath)
 
 ### Pending Todos
 
@@ -109,6 +113,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-04T01:22:31.208Z
-Stopped at: Completed 04-01-PLAN.md (LSP JSON-RPC message framing)
+Last session: 2026-03-04T01:23:23.272Z
+Stopped at: Completed 04-02-PLAN.md (Screenshot capture tool)
 Resume file: None

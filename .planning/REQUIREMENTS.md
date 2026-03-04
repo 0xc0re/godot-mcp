@@ -42,7 +42,7 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 ### Runtime & Debug
 
-- [ ] **RUNT-01**: User can capture a screenshot of the running game for AI visual inspection
+- [x] **RUNT-01**: User can capture a screenshot of the running game for AI visual inspection
 
 ## v2 Requirements
 
@@ -99,7 +99,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROJ-01 | Phase 3 | Complete |
 | PROJ-02 | Phase 3 | Complete |
 | PROJ-03 | Phase 3 | Complete |
-| RUNT-01 | Phase 4 | Pending |
+| RUNT-01 | Phase 4 | Complete |
 
 **Coverage:**
 - v1 requirements: 22 total
