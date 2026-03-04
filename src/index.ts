@@ -15,6 +15,7 @@ import { registerSceneTools } from './tools/scene.js';
 import { registerScriptTools } from './tools/script.js';
 import { registerUidTools } from './tools/uid.js';
 import { registerDiagnosticsTools } from './tools/diagnostics.js';
+import { registerCompositionTools } from './tools/composition.js';
 import { registerGodotResources } from './resources/godot-resources.js';
 
 const server = new McpServer(
@@ -35,6 +36,8 @@ registerSceneTools(server, ctx);
 registerScriptTools(server, ctx);
 registerUidTools(server, ctx);
 registerDiagnosticsTools(server, ctx);
+// Scene composition tools (signals, instances, groups, batch properties)
+registerCompositionTools(server, ctx);
 
 // Register MCP resources for @mention context
 registerGodotResources(server, ctx);
