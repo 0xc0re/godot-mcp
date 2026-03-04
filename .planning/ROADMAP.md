@@ -54,11 +54,12 @@ Plans:
   3. AI can create a .gdshader file and a ShaderMaterial .tres that references it, with configurable shader parameters
   4. AI can export a project headlessly for a named preset, with pre-flight validation that catches missing presets or templates before the export runs
   5. AI can list available export presets from export_presets.cfg
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 06-01: TBD
-- [ ] 06-02: TBD
+- [ ] 06-01-PLAN.md -- GDScript backend operations + execGodot timeout extension
+- [ ] 06-02-PLAN.md -- Config + Shader TypeScript tool handlers + tests
+- [ ] 06-03-PLAN.md -- Export tool handlers + tests + index.ts wiring
 
 ### Phase 7: Animation & TileMap
 **Goal**: AI can create animated characters with keyframed property tracks and build tile-based game levels with atlas-based tilesets
@@ -101,6 +102,6 @@ Phases execute in numeric order: 5 -> 6 -> 7 -> 8
 | 3. Project & Script Intelligence | v1.0 | 3/3 | Complete | 2026-03-04 |
 | 4. Diagnostics & Runtime | v1.0 | 3/3 | Complete | 2026-03-04 |
 | 5. Scene Composition | v2.0 | 0/2 | Planning complete | - |
-| 6. Project Configuration & Assets | v2.0 | 0/? | Not started | - |
+| 6. Project Configuration & Assets | v2.0 | 0/3 | Planning complete | - |
 | 7. Animation & TileMap | v2.0 | 0/? | Not started | - |
 | 8. Runtime Inspection & Reload | v2.0 | 0/? | Not started | - |
