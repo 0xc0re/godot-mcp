@@ -14,10 +14,11 @@ import { registerResourceTools } from './tools/resource.js';
 import { registerSceneTools } from './tools/scene.js';
 import { registerScriptTools } from './tools/script.js';
 import { registerUidTools } from './tools/uid.js';
+import { registerGodotResources } from './resources/godot-resources.js';
 
 const server = new McpServer(
   { name: 'godot-mcp', version: '0.2.0' },
-  { capabilities: { tools: {} } },
+  { capabilities: { tools: {}, resources: {} } },
 );
 
 // Error handling on the underlying Server instance
@@ -32,6 +33,9 @@ registerResourceTools(server, ctx);
 registerSceneTools(server, ctx);
 registerScriptTools(server, ctx);
 registerUidTools(server, ctx);
+
+// Register MCP resources for @mention context
+registerGodotResources(server, ctx);
 
 // Graceful shutdown: kill all tracked processes, close server
 const shutdown = async () => {
