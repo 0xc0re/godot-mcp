@@ -21,11 +21,11 @@ Requirements for v2.0 Enhancements milestone. Each maps to roadmap phases.
 - [x] **CONF-01**: AI can add an input action with keyboard key binding to project.godot
 - [x] **CONF-02**: AI can add an input action with joypad button/axis binding to project.godot
 - [x] **CONF-03**: AI can remove an input action from project.godot
-- [ ] **CONF-04**: AI can list all configured input actions with their bindings
+- [x] **CONF-04**: AI can list all configured input actions with their bindings
 
 ### Shader Management
 
-- [ ] **SHDR-01**: AI can create a .gdshader file with specified shader_type and source code
+- [x] **SHDR-01**: AI can create a .gdshader file with specified shader_type and source code
 - [x] **SHDR-02**: AI can create a ShaderMaterial resource (.tres) referencing a .gdshader file
 - [x] **SHDR-03**: AI can set shader parameters on an existing ShaderMaterial resource
 
@@ -109,8 +109,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CONF-01 | Phase 6 | Complete |
 | CONF-02 | Phase 6 | Complete |
 | CONF-03 | Phase 6 | Complete |
-| CONF-04 | Phase 6 | Pending |
-| SHDR-01 | Phase 6 | Pending |
+| CONF-04 | Phase 6 | Complete |
+| SHDR-01 | Phase 6 | Complete |
 | SHDR-02 | Phase 6 | Complete |
 | SHDR-03 | Phase 6 | Complete |
 | ANIM-01 | Phase 7 | Pending |

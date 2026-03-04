@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Enhancements
 status: executing
-stopped_at: Completed 06-01-PLAN.md
-last_updated: "2026-03-04T04:33:25.825Z"
-last_activity: 2026-03-04 -- Completed 06-01 GDScript backend operations
+stopped_at: Completed 06-02-PLAN.md
+last_updated: "2026-03-04T04:39:45.768Z"
+last_activity: 2026-03-04 -- Completed 06-02 Config & Shader tool handlers
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 5
-  completed_plans: 3
-  percent: 88
+  completed_plans: 4
+  percent: 94
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-03)
 ## Current Position
 
 Phase: 6 of 8 (Project Configuration & Assets)
-Plan: 1 of 3 complete
+Plan: 2 of 3 complete
 Status: Executing Phase 06
-Last activity: 2026-03-04 -- Completed 06-01 GDScript backend operations
+Last activity: 2026-03-04 -- Completed 06-02 Config & Shader tool handlers
 
-Progress: [█████████░] 88%
+Progress: [█████████░] 94%
 
 ## Performance Metrics
 
@@ -53,7 +53,7 @@ Progress: [█████████░] 88%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 05-scene-composition | 2/2 | 5min | 2.5min |
-| 06-project-configuration-assets | 1/3 | 2min | 2min |
+| 06-project-configuration-assets | 2/3 | 6min | 3min |
 
 ## Accumulated Context
 
@@ -62,6 +62,8 @@ Progress: [█████████░] 88%
 Decisions logged in PROJECT.md Key Decisions table.
 
 Recent:
+- 06-02: create_shader writes .gdshader directly to disk (plain text, no GDScript needed)
+- 06-02: list_input_actions parses project.godot locally via parseProjectSettings instead of running Godot
 - 06-01: Used typed Array[InputEvent] for ProjectSettings input action events
 - 06-01: Shader material operations reuse existing ensure_res_prefix and convert_json_to_godot_type helpers
 - 06-01: execGodot timeout parameter is optional with backward-compatible default
@@ -84,6 +86,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-04T04:33:25.823Z
-Stopped at: Completed 06-01-PLAN.md
+Last session: 2026-03-04T04:39:45.766Z
+Stopped at: Completed 06-02-PLAN.md
 Resume file: None
