@@ -21,6 +21,7 @@ import { registerShaderTools } from './tools/shader.js';
 import { registerExportTools } from './tools/export.js';
 import { registerAnimationTools } from './tools/animation.js';
 import { registerTileMapTools } from './tools/tilemap.js';
+import { registerRuntimeTools } from './tools/runtime.js';
 import { registerGodotResources } from './resources/godot-resources.js';
 
 const server = new McpServer(
@@ -50,6 +51,8 @@ registerExportTools(server, ctx);
 // Animation & tilemap tools (Phase 7)
 registerAnimationTools(server, ctx);
 registerTileMapTools(server, ctx);
+// Runtime inspection & hot-reload tools (Phase 8)
+registerRuntimeTools(server, ctx);
 
 // Register MCP resources for @mention context
 registerGodotResources(server, ctx);
