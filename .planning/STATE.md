@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Enhancements
-status: in_progress
-stopped_at: Completed 08-01-PLAN.md
-last_updated: "2026-03-04T05:46:33Z"
-last_activity: 2026-03-04 -- Completed 08-01 runtime inspection tools
+status: complete
+stopped_at: Completed 08-02-PLAN.md
+last_updated: "2026-03-04T05:51:28Z"
+last_activity: 2026-03-04 -- Completed 08-02 restart_project tool and server registration
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 10
-  completed_plans: 9
-  percent: 90
+  completed_plans: 10
+  percent: 100
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-03-03)
 ## Current Position
 
 Phase: 8 of 8 (Runtime Inspection & Reload)
-Plan: 1 of 2 complete
-Status: In Progress
-Last activity: 2026-03-04 -- Completed 08-01 runtime inspection tools
+Plan: 2 of 2 complete
+Status: Complete
+Last activity: 2026-03-04 -- Completed 08-02 restart_project tool and server registration
 
-Progress: [█████████░] 90%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -55,7 +55,7 @@ Progress: [█████████░] 90%
 | 05-scene-composition | 2/2 | 5min | 2.5min |
 | 06-project-configuration-assets | 3/3 | 9min | 3min |
 | 07-animation-tilemap | 3/3 | 8min | 2.7min |
-| 08-runtime-inspection-reload | 1/2 | 3min | 3min |
+| 08-runtime-inspection-reload | 2/2 | 5min | 2.5min |
 
 ## Accumulated Context
 
@@ -64,6 +64,10 @@ Progress: [█████████░] 90%
 Decisions logged in PROJECT.md Key Decisions table.
 
 Recent:
+- 08-02: restart_project reuses run_project spawn pattern from editor.ts (args, stdio, listeners)
+- 08-02: Exit wait uses 3s timeout for processes that don't exit cleanly on kill
+- 08-02: Running confirmation via stdout.once('data') with 5s timeout (engine prints version on startup)
+- 08-02: Scene parameter validated via validatePath before inclusion in spawn args
 - 08-01: File-polling IPC reuses screenshot_helper.gd pattern -- no new protocols or dependencies
 - 08-01: runtime_helper.gd filters properties by PROPERTY_USAGE_STORAGE, skips underscore-prefixed
 - 08-01: Non-JSON-serializable Godot types converted via var_to_str() (Vector2, Color, NodePath, etc.)
@@ -106,6 +110,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-04T05:46:33Z
-Stopped at: Completed 08-01-PLAN.md
+Last session: 2026-03-04T05:51:28Z
+Stopped at: Completed 08-02-PLAN.md (Phase 8 complete, v2.0 milestone complete)
 Resume file: None

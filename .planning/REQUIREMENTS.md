@@ -57,8 +57,8 @@ Requirements for v2.0 Enhancements milestone. Each maps to roadmap phases.
 
 ### Hot-Reload
 
-- [ ] **HTRL-01**: AI can trigger a project restart after script changes (stop + run cycle)
-- [ ] **HTRL-02**: AI receives confirmation that the restarted project is running and responsive
+- [x] **HTRL-01**: AI can trigger a project restart after script changes (stop + run cycle)
+- [x] **HTRL-02**: AI receives confirmation that the restarted project is running and responsive
 
 ## Future Requirements
 
@@ -127,8 +127,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EXPT-01 | Phase 6 | Complete |
 | EXPT-02 | Phase 6 | Complete |
 | EXPT-03 | Phase 6 | Complete |
-| HTRL-01 | Phase 8 | Pending |
-| HTRL-02 | Phase 8 | Pending |
+| HTRL-01 | Phase 8 | Complete |
+| HTRL-02 | Phase 8 | Complete |
 
 **Coverage:**
 - v2.0 requirements: 29 total
