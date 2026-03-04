@@ -36,8 +36,8 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 ### Project Management
 
-- [ ] **PROJ-01**: User can read project.godot settings (autoloads, input maps, render config, features)
-- [ ] **PROJ-02**: User can modify project.godot settings programmatically (add autoloads, change settings)
+- [x] **PROJ-01**: User can read project.godot settings (autoloads, input maps, render config, features)
+- [x] **PROJ-02**: User can modify project.godot settings programmatically (add autoloads, change settings)
 - [ ] **PROJ-03**: MCP resources exposed so users can @mention scenes and scripts as context in Claude Code
 
 ### Runtime & Debug
@@ -96,8 +96,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SCRI-02 | Phase 3 | Pending |
 | SCRI-03 | Phase 4 | Pending |
 | SCRI-04 | Phase 3 | Pending |
-| PROJ-01 | Phase 3 | Pending |
-| PROJ-02 | Phase 3 | Pending |
+| PROJ-01 | Phase 3 | Complete |
+| PROJ-02 | Phase 3 | Complete |
 | PROJ-03 | Phase 3 | Pending |
 | RUNT-01 | Phase 4 | Pending |
 
