@@ -83,6 +83,10 @@ func _init():
             validate_scripts(params)
         "modify_project_setting":
             modify_project_setting(params)
+        "list_scripts":
+            list_scripts(params)
+        "query_class":
+            query_class(params)
         _:
             log_error("Unknown operation: " + operation)
             quit(1)
@@ -1613,4 +1617,137 @@ func modify_project_setting(params):
         "section": section,
         "key": key,
         "action": action
+    }))
+
+# List all GDScript files in a project with introspection data
+# Returns per-script: path, class_name, methods, properties, signals
+func list_scripts(params):
+    var base_path = params.get("path_filter", "res://")
+    if base_path == "":
+        base_path = "res://"
+    if not base_path.begins_with("res://"):
+        base_path = "res://" + base_path
+
+    log_info("Listing scripts in: " + base_path)
+
+    var gd_files = find_gd_files(base_path)
+    var scripts_data = []
+
+    for file_path in gd_files:
+        var script = load(file_path)
+        if script == null:
+            log_error("Failed to load script: " + file_path)
+            continue
+
+        var gd_script = script as GDScript
+        if gd_script == null:
+            log_error("Not a GDScript: " + file_path)
+            continue
+
+        # Extract class name
+        var script_class_name = ""
+        if gd_script.has_method("get_global_name"):
+            script_class_name = gd_script.get_global_name()
+
+        # Extract methods (filter: skip names starting with _)
+        var methods = []
+        for method in gd_script.get_script_method_list():
+            var method_name = method["name"]
+            if not method_name.begins_with("_"):
+                methods.append({
+                    "name": method_name,
+                    "args": method["args"].size()
+                })
+
+        # Extract properties (filter: PROPERTY_USAGE_SCRIPT_VARIABLE)
+        var properties = []
+        for prop in gd_script.get_script_property_list():
+            if prop["usage"] & PROPERTY_USAGE_SCRIPT_VARIABLE:
+                properties.append({
+                    "name": prop["name"],
+                    "type": prop["type"]
+                })
+
+        # Extract signals
+        var signals = []
+        for sig in gd_script.get_script_signal_list():
+            signals.append({
+                "name": sig["name"],
+                "args": sig["args"].size()
+            })
+
+        scripts_data.append({
+            "path": file_path,
+            "class_name": script_class_name,
+            "methods": methods,
+            "properties": properties,
+            "signals": signals
+        })
+
+    print(JSON.stringify({
+        "scripts": scripts_data,
+        "total": scripts_data.size()
+    }))
+
+# Query Godot ClassDB for a class's properties, methods, and signals
+func query_class(params):
+    var class_name_param = params.get("class_name", "")
+    var no_inheritance = params.get("no_inheritance", false)
+
+    if class_name_param == "":
+        log_error("Missing required parameter: class_name")
+        print(JSON.stringify({"error": "Missing required parameter: class_name"}))
+        return
+
+    if not ClassDB.class_exists(class_name_param):
+        log_error("Class does not exist: " + class_name_param)
+        print(JSON.stringify({"error": "Class does not exist: " + class_name_param}))
+        return
+
+    var parent_class = ClassDB.get_parent_class(class_name_param)
+
+    # Get properties
+    var properties = []
+    for prop in ClassDB.class_get_property_list(class_name_param, no_inheritance):
+        properties.append({
+            "name": prop["name"],
+            "type": prop["type"],
+            "usage": prop["usage"]
+        })
+
+    # Get methods
+    var methods = []
+    for method in ClassDB.class_get_method_list(class_name_param, no_inheritance):
+        var args = []
+        for arg in method["args"]:
+            args.append({
+                "name": arg["name"],
+                "type": arg["type"]
+            })
+        methods.append({
+            "name": method["name"],
+            "return_type": method["return_val"]["type"],
+            "args": args
+        })
+
+    # Get signals
+    var signals = []
+    for sig in ClassDB.class_get_signal_list(class_name_param, no_inheritance):
+        var sig_args = []
+        for arg in sig["args"]:
+            sig_args.append({
+                "name": arg["name"],
+                "type": arg["type"]
+            })
+        signals.append({
+            "name": sig["name"],
+            "args": sig_args
+        })
+
+    print(JSON.stringify({
+        "class_name": class_name_param,
+        "parent_class": parent_class,
+        "properties": properties,
+        "methods": methods,
+        "signals": signals
     }))
