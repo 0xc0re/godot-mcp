@@ -32,10 +32,22 @@ An AI assistant connected via this server can perform any Godot development oper
 
 ### Active
 
-- [ ] Runtime scene tree inspection via DAP (Debug Adapter Protocol)
-- [ ] Export project headlessly for Web/Windows/Linux builds
-- [ ] Tool search/pagination for when tool count exceeds ~30
-- [ ] Hot-reload GDScript changes in running project
+## Current Milestone: v2.0 Enhancements
+
+**Goal:** Close every major gap between the current server and a fully autonomous Godot game development AI — an AI connected via this server should be able to compose complete game scenes, wire game logic, configure game systems, inspect runtime state, and export builds.
+
+**Target features:**
+- Signal connections (connect/disconnect between nodes in scenes)
+- Scene instancing (add .tscn as child node in another scene)
+- Batch property operations (set multiple properties in one subprocess)
+- Node groups (add/remove nodes from groups)
+- Input action management (configure input map entries)
+- Animation tools (create/modify AnimationPlayer tracks and AnimationLibrary)
+- TileMap/TileSet operations (configure tilesets, paint tiles)
+- Shader file management (create .gdshader files, ShaderMaterial resources)
+- Runtime scene tree inspection via DAP (Debug Adapter Protocol)
+- Export project headlessly for Web/Windows/Linux builds
+- Hot-reload GDScript changes in running project
 
 ### Out of Scope
 
@@ -74,4 +86,4 @@ Primary use case: Developing BFG (Best Friend Game) — an isometric roguelike i
 | Graceful degradation (empty results on timeout) | Better UX than hard errors for LSP/diagnostics | ✓ Good — non-blocking workflow |
 
 ---
-*Last updated: 2026-03-04 after v1.0 milestone*
+*Last updated: 2026-03-03 after starting v2.0 Enhancements milestone*

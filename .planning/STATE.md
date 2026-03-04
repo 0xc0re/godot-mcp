@@ -1,34 +1,34 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: MVP
-status: completed
-stopped_at: Milestone v1.0 MVP archived
-last_updated: "2026-03-04"
-last_activity: 2026-03-04 — Milestone v1.0 MVP archived
+milestone: v2.0
+milestone_name: Enhancements
+status: active
+stopped_at: Defining requirements
+last_updated: "2026-03-03"
+last_activity: 2026-03-03 — Milestone v2.0 started
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 12
-  completed_plans: 12
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-04)
+See: .planning/PROJECT.md (updated 2026-03-03)
 
 **Core value:** An AI assistant connected via this server can perform any Godot development operation that a human developer would do
-**Current focus:** Planning next milestone
+**Current focus:** Milestone v2.0 Enhancements — defining requirements
 
 ## Current Position
 
-Milestone v1.0 MVP shipped 2026-03-04.
-All 4 phases, 12 plans complete. 22/22 requirements validated.
-
-Next: `/gsd:new-milestone` to define v1.1 scope.
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-03-03 — Milestone v2.0 started
 
 ## Performance Metrics
 
@@ -58,10 +58,10 @@ None.
 
 ### Blockers/Concerns
 
-None — all v1.0 blockers resolved.
+None.
 
 ## Session Continuity
 
-Last session: 2026-03-04
-Stopped at: Milestone v1.0 MVP archived
+Last session: 2026-03-03
+Stopped at: Defining requirements for v2.0 Enhancements
 Resume file: None
