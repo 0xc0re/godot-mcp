@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-03-03)
 Phase: 8 of 8 (Runtime Inspection & Reload)
 Plan: 2 of 2 complete
 Status: Complete
-Last activity: 2026-03-04 -- Completed quick task 1: structured logging with tool-call instrumentation
+Last activity: 2026-03-04 - Completed quick task 1: add logging so we can see when/what is called
 
 Progress: [██████████] 100%
 
@@ -107,6 +107,12 @@ None.
 
 - Phase 7: Headless TileSet texture loading needs validation (may return null without display server)
 - Phase 8: Godot 4.5+ DAP regression may affect runtime inspection approach
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 1 | add logging so we can see when/what is called | 2026-03-04 | ee560d3 | [1-add-logging-so-we-can-see-when-what-is-c](./quick/1-add-logging-so-we-can-see-when-what-is-c/) |
 
 ## Session Continuity
 
