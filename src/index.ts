@@ -23,6 +23,7 @@ import { registerAnimationTools } from './tools/animation.js';
 import { registerTileMapTools } from './tools/tilemap.js';
 import { registerRuntimeTools } from './tools/runtime.js';
 import { registerGodotResources } from './resources/godot-resources.js';
+import { logger, wrapServerWithLogging } from './logger.js';
 
 const server = new McpServer(
   { name: 'godot-mcp', version: '0.2.0' },
@@ -30,9 +31,12 @@ const server = new McpServer(
 );
 
 // Error handling on the underlying Server instance
-server.server.onerror = (error: unknown) => console.error('[MCP Error]', error);
+server.server.onerror = (error: unknown) => logger.error(`MCP protocol error: ${error}`);
 
 const ctx = await createServerContext();
+
+// Wrap registerTool to add automatic logging to every tool callback
+wrapServerWithLogging(server);
 
 // Register all tool domains (must happen before connect)
 registerEditorTools(server, ctx);
@@ -59,7 +63,7 @@ registerGodotResources(server, ctx);
 
 // Graceful shutdown: kill all tracked processes, close server
 const shutdown = async () => {
-  console.error('[SERVER] Shutting down...');
+  logger.info('Server shutting down...');
   if (ctx.activeProcess) {
     ctx.activeProcess.process.kill();
     ctx.activeProcess = null;
@@ -89,4 +93,4 @@ process.on('SIGTERM', shutdown);
 // Connect transport and start
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error('Godot MCP server running on stdio');
+logger.info('Server started on stdio transport');
