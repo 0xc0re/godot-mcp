@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v0.1
 milestone_name: milestone
-status: completed
-stopped_at: Completed 03-03-PLAN.md (MCP resource registration)
-last_updated: "2026-03-04T00:54:42.734Z"
-last_activity: 2026-03-04 — Completed 03-03-PLAN.md (MCP resource registration)
+status: executing
+stopped_at: Completed 04-01-PLAN.md (LSP JSON-RPC message framing)
+last_updated: "2026-03-04T01:22:31.210Z"
+last_activity: 2026-03-04 — Completed 04-01-PLAN.md (LSP JSON-RPC message framing)
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 9
-  completed_plans: 9
-  percent: 100
+  total_plans: 12
+  completed_plans: 10
+  percent: 83
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-03)
 
 **Core value:** An AI assistant connected via this server can perform any Godot development operation that a human developer would do
-**Current focus:** Phase 3 — Project & Script Intelligence
+**Current focus:** Phase 4 — Diagnostics & Runtime
 
 ## Current Position
 
-Phase: 3 of 4 (Project & Script Intelligence)
-Plan: 3 of 3 in current phase -- COMPLETE
-Status: Phase Complete
-Last activity: 2026-03-04 — Completed 03-03-PLAN.md (MCP resource registration)
+Phase: 4 of 4 (Diagnostics & Runtime)
+Plan: 1 of 3 in current phase -- COMPLETE
+Status: In Progress
+Last activity: 2026-03-04 — Completed 04-01-PLAN.md (LSP JSON-RPC message framing)
 
-Progress: [##########] 100%
+Progress: [########░░] 83%
 
 ## Performance Metrics
 
@@ -53,6 +53,7 @@ Progress: [##########] 100%
 
 *Updated after each plan completion*
 | Phase 03 P03 | 2min | 2 tasks | 3 files |
+| Phase 04 P01 | 2min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -92,6 +93,9 @@ Recent decisions affecting current work:
 - [03-03]: URI-encode path segments to handle spaces and special characters in resource URIs
 - [03-03]: Graceful degradation to empty resource list when no valid Godot project found
 - [Phase 03-03]: Used GODOT_PROJECT_PATH env var with cwd fallback for resource project path resolution
+- [Phase 04-01]: Used Buffer.byteLength for Content-Length (handles UTF-8 multi-byte characters correctly)
+- [Phase 04-01]: parseMessages returns remainder Buffer for TCP stream reassembly across data events
+- [Phase 04-01]: Constants extracted for HEADER_SEPARATOR and CONTENT_LENGTH_RE regex
 
 ### Pending Todos
 
@@ -105,6 +109,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-04T00:50:40.316Z
-Stopped at: Completed 03-03-PLAN.md (MCP resource registration)
+Last session: 2026-03-04T01:22:31.208Z
+Stopped at: Completed 04-01-PLAN.md (LSP JSON-RPC message framing)
 Resume file: None

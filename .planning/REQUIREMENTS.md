@@ -31,7 +31,7 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 - [x] **SCRI-01**: User can batch-validate all GDScript files for parse errors via `godot --check-only --headless`
 - [x] **SCRI-02**: User can list all project scripts with structure summary (exported functions, variables, signals)
-- [ ] **SCRI-03**: User can get real-time GDScript diagnostics via Godot's LSP (syntax errors, type warnings)
+- [x] **SCRI-03**: User can get real-time GDScript diagnostics via Godot's LSP (syntax errors, type warnings)
 - [x] **SCRI-04**: User can query Godot's ClassDB for class properties, methods, and signals to prevent AI hallucination
 
 ### Project Management
@@ -94,7 +94,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SCEN-06 | Phase 2 | Complete |
 | SCRI-01 | Phase 2 | Complete |
 | SCRI-02 | Phase 3 | Complete |
-| SCRI-03 | Phase 4 | Pending |
+| SCRI-03 | Phase 4 | Complete |
 | SCRI-04 | Phase 3 | Complete |
 | PROJ-01 | Phase 3 | Complete |
 | PROJ-02 | Phase 3 | Complete |
