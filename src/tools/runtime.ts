@@ -9,8 +9,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { join } from 'path';
 import { existsSync, writeFileSync, readFileSync, unlinkSync } from 'fs';
+import { spawn } from 'child_process';
 import type { ServerContext } from '../types.js';
-import { validatePath } from '../godot.js';
+import { validatePath, trackProcess } from '../godot.js';
 import { toolError } from '../errors.js';
 
 /** Relative path within project to the trigger file */
@@ -291,6 +292,100 @@ export function registerRuntimeTools(server: McpServer, ctx: ServerContext): voi
           'Verify the RuntimeHelper autoload is configured',
         ]);
       }
+    },
+  );
+
+  // Tool 4: restart_project
+  server.registerTool(
+    'restart_project',
+    {
+      title: 'Restart Project',
+      description:
+        'Stop the running Godot project and relaunch it. ' +
+        'Use after making script changes to apply them. ' +
+        'Returns confirmation with PID when the restarted project is running.',
+      inputSchema: {
+        project_path: z.string().describe('Path to the Godot project directory'),
+        scene: z.string().optional().describe('Optional: Specific scene to run after restart'),
+      },
+    },
+    async ({ project_path, scene }) => {
+      if (!validatePath(project_path)) {
+        return toolError('Invalid project path', [
+          'Provide a valid path without ".." or other potentially unsafe characters',
+        ]);
+      }
+
+      if (!ctx.activeProcess) {
+        return toolError('No active Godot process to restart', [
+          'Use run_project to start a Godot project first',
+        ]);
+      }
+
+      // Kill existing process
+      ctx.activeProcess.process.kill();
+
+      // Wait for exit with 3s timeout
+      await new Promise<void>((resolve) => {
+        const proc = ctx.activeProcess!.process;
+        proc.once('exit', () => resolve());
+        setTimeout(() => resolve(), 3000);
+      });
+
+      // Clear old process state
+      ctx.activeProcess = null;
+
+      // Build args for new process
+      const args = ['-d', '--path', project_path];
+      if (scene && validatePath(scene)) {
+        args.push(scene);
+      }
+
+      // Spawn new process
+      const proc = trackProcess(
+        ctx,
+        spawn(ctx.godotPath, args, { stdio: 'pipe' }),
+      );
+      const output: string[] = [];
+      const errors: string[] = [];
+
+      proc.stdout?.on('data', (data: Buffer) => {
+        const lines = data.toString().split('\n');
+        output.push(...lines);
+      });
+
+      proc.stderr?.on('data', (data: Buffer) => {
+        const lines = data.toString().split('\n');
+        errors.push(...lines);
+      });
+
+      ctx.activeProcess = { process: proc, output, errors };
+
+      // Wait for first stdout data with 5s timeout (confirms engine is running)
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => resolve(), 5000);
+        proc.stdout?.once('data', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+        proc.once('error', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify({
+              message: 'Project restarted successfully',
+              pid: proc.pid,
+              running: !proc.killed,
+            }),
+          },
+        ],
+      };
     },
   );
 }
