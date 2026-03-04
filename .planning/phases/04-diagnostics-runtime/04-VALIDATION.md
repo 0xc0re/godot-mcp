@@ -38,15 +38,12 @@ created: 2026-03-03
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 04-01-01 | 01 | 0 | SCRI-03 | unit | `npx vitest run tests/lsp-protocol.test.ts -x` | ❌ W0 | ⬜ pending |
-| 04-01-02 | 01 | 0 | SCRI-03 | unit | `npx vitest run tests/lsp-client.test.ts -x` | ❌ W0 | ⬜ pending |
-| 04-01-03 | 01 | 0 | RUNT-01 | unit | `npx vitest run tests/screenshot-tools.test.ts -x` | ❌ W0 | ⬜ pending |
-| 04-02-01 | 02 | 1 | SCRI-03 | unit | `npx vitest run tests/lsp-protocol.test.ts -x` | ❌ W0 | ⬜ pending |
-| 04-02-02 | 02 | 1 | SCRI-03 | unit | `npx vitest run tests/lsp-client.test.ts -x` | ❌ W0 | ⬜ pending |
-| 04-02-03 | 02 | 1 | SCRI-03 | unit | `npx vitest run tests/diagnostics-tools.test.ts -x` | ❌ W0 | ⬜ pending |
-| 04-03-01 | 03 | 1 | RUNT-01 | unit | `npx vitest run tests/screenshot-tools.test.ts -x` | ❌ W0 | ⬜ pending |
+| 04-01-01 | 01 | 0 | SCRI-03 | unit | `npx vitest run tests/lsp-protocol.test.ts -x` | W0 | pending |
+| 04-02-01 | 02 | 1 | RUNT-01 | unit | `npx vitest run tests/screenshot-tools.test.ts -x` | W0 | pending |
+| 04-03-01 | 03 | 2 | SCRI-03 | unit | `npx vitest run tests/lsp-client.test.ts -x` | W0 | pending |
+| 04-03-02 | 03 | 2 | SCRI-03 | unit | `npx vitest run tests/diagnostics-tools.test.ts -x` | W0 | pending |
 
-*Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
+*Status: pending / green / red / flaky*
 
 ---
 
