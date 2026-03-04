@@ -31,17 +31,17 @@ Requirements for v2.0 Enhancements milestone. Each maps to roadmap phases.
 
 ### Animation
 
-- [ ] **ANIM-01**: AI can create an Animation resource with value tracks (property animation)
-- [ ] **ANIM-02**: AI can create an AnimationLibrary resource containing named animations
-- [ ] **ANIM-03**: AI can add keyframes to an existing animation track (time + value pairs)
-- [ ] **ANIM-04**: AI can assign an AnimationLibrary to an AnimationPlayer node in a scene
+- [x] **ANIM-01**: AI can create an Animation resource with value tracks (property animation)
+- [x] **ANIM-02**: AI can create an AnimationLibrary resource containing named animations
+- [x] **ANIM-03**: AI can add keyframes to an existing animation track (time + value pairs)
+- [x] **ANIM-04**: AI can assign an AnimationLibrary to an AnimationPlayer node in a scene
 
 ### TileMap
 
-- [ ] **TILE-01**: AI can create a TileSet resource with a TileSetAtlasSource (texture + tile size)
-- [ ] **TILE-02**: AI can paint cells on a TileMapLayer node (set_cell with source_id and atlas_coords)
-- [ ] **TILE-03**: AI can paint a rectangular region of tiles in a single operation (bulk fill)
-- [ ] **TILE-04**: AI can clear cells on a TileMapLayer node
+- [x] **TILE-01**: AI can create a TileSet resource with a TileSetAtlasSource (texture + tile size)
+- [x] **TILE-02**: AI can paint cells on a TileMapLayer node (set_cell with source_id and atlas_coords)
+- [x] **TILE-03**: AI can paint a rectangular region of tiles in a single operation (bulk fill)
+- [x] **TILE-04**: AI can clear cells on a TileMapLayer node
 
 ### Runtime Inspection
 
@@ -113,14 +113,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SHDR-01 | Phase 6 | Complete |
 | SHDR-02 | Phase 6 | Complete |
 | SHDR-03 | Phase 6 | Complete |
-| ANIM-01 | Phase 7 | Pending |
-| ANIM-02 | Phase 7 | Pending |
-| ANIM-03 | Phase 7 | Pending |
-| ANIM-04 | Phase 7 | Pending |
-| TILE-01 | Phase 7 | Pending |
-| TILE-02 | Phase 7 | Pending |
-| TILE-03 | Phase 7 | Pending |
-| TILE-04 | Phase 7 | Pending |
+| ANIM-01 | Phase 7 | Complete |
+| ANIM-02 | Phase 7 | Complete |
+| ANIM-03 | Phase 7 | Complete |
+| ANIM-04 | Phase 7 | Complete |
+| TILE-01 | Phase 7 | Complete |
+| TILE-02 | Phase 7 | Complete |
+| TILE-03 | Phase 7 | Complete |
+| TILE-04 | Phase 7 | Complete |
 | RUNT-01 | Phase 8 | Pending |
 | RUNT-02 | Phase 8 | Pending |
 | RUNT-03 | Phase 8 | Pending |
