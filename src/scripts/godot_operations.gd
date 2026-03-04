@@ -113,6 +113,10 @@ func _init():
             add_keyframes(params)
         "assign_animation_library":
             assign_animation_library(params)
+        "create_tileset":
+            create_tileset(params)
+        "paint_tilemap":
+            paint_tilemap(params)
         _:
             log_error("Unknown operation: " + operation)
             quit(1)
@@ -2394,3 +2398,184 @@ func assign_animation_library(params):
         return
 
     print(JSON.stringify({"success": true, "library_name": library_name, "scene_path": scene_path}))
+
+# Create a TileSet with TileSetAtlasSource referencing a texture
+func create_tileset(params):
+    var output_path = ensure_res_prefix(params.get("output_path", ""))
+    var texture_path = ensure_res_prefix(params.get("texture_path", ""))
+    var tile_width = int(params.get("tile_width", 16))
+    var tile_height = int(params.get("tile_height", 16))
+    var separation_x = int(params.get("separation_x", 0))
+    var separation_y = int(params.get("separation_y", 0))
+    var margin_x = int(params.get("margin_x", 0))
+    var margin_y = int(params.get("margin_y", 0))
+    var columns = int(params.get("columns", 0))
+    var rows = int(params.get("rows", 0))
+
+    if output_path == "res://" or texture_path == "res://":
+        log_error("Missing required parameters: output_path and texture_path")
+        print(JSON.stringify({"success": false, "error": "Missing required parameters: output_path and texture_path"}))
+        return
+
+    log_info("Creating tileset: " + output_path)
+
+    # Load texture
+    var texture = load(texture_path) as Texture2D
+    if texture == null:
+        log_error("Failed to load texture: " + texture_path)
+        print(JSON.stringify({"success": false, "error": "Failed to load texture: " + texture_path}))
+        return
+
+    # Create TileSet
+    var tileset = TileSet.new()
+    tileset.tile_size = Vector2i(tile_width, tile_height)
+
+    # Create atlas source
+    var atlas_source = TileSetAtlasSource.new()
+
+    # CRITICAL: Set texture BEFORE create_tile()
+    atlas_source.texture = texture
+    atlas_source.texture_region_size = Vector2i(tile_width, tile_height)
+
+    if separation_x != 0 or separation_y != 0:
+        atlas_source.separation = Vector2i(separation_x, separation_y)
+
+    if margin_x != 0 or margin_y != 0:
+        atlas_source.margins = Vector2i(margin_x, margin_y)
+
+    # Calculate grid dimensions
+    var grid_w = columns
+    var grid_h = rows
+
+    if grid_w <= 0 or grid_h <= 0:
+        var tex_size = texture.get_size()
+        if tex_size.x <= 0 or tex_size.y <= 0:
+            log_error("Texture has zero size and no columns/rows provided")
+            print(JSON.stringify({"success": false, "error": "Texture has zero size and no columns/rows provided"}))
+            return
+        # Calculate from texture size accounting for margins and separation
+        grid_w = int((tex_size.x - margin_x * 2 + separation_x) / (tile_width + separation_x))
+        grid_h = int((tex_size.y - margin_y * 2 + separation_y) / (tile_height + separation_y))
+
+    if grid_w <= 0 or grid_h <= 0:
+        log_error("Calculated grid size is zero or negative: " + str(grid_w) + "x" + str(grid_h))
+        print(JSON.stringify({"success": false, "error": "Calculated grid size is zero or negative"}))
+        return
+
+    # Create tiles in grid
+    for y in range(grid_h):
+        for x in range(grid_w):
+            atlas_source.create_tile(Vector2i(x, y))
+
+    var source_id = tileset.add_source(atlas_source)
+
+    # Ensure output directory exists
+    var dir_path = output_path.get_base_dir()
+    if not DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(dir_path)):
+        var dir = DirAccess.open("res://")
+        if dir:
+            var relative_dir = dir_path.substr(6)  # Remove "res://" prefix
+            if not relative_dir.is_empty():
+                dir.make_dir_recursive(relative_dir)
+
+    var error = ResourceSaver.save(tileset, output_path)
+    if error != OK:
+        log_error("Failed to save tileset: " + str(error))
+        print(JSON.stringify({"success": false, "error": "Failed to save tileset: " + str(error)}))
+        return
+
+    print(JSON.stringify({"success": true, "path": output_path, "source_id": source_id, "grid_size": {"x": grid_w, "y": grid_h}, "tile_count": grid_w * grid_h}))
+
+# Paint, fill, or clear cells on a TileMapLayer node in a scene
+func paint_tilemap(params):
+    var scene_path = ensure_res_prefix(params.get("scene_path", ""))
+    var node_path = params.get("node_path", "")
+    var mode = params.get("mode", "paint")
+
+    if scene_path == "res://":
+        log_error("Missing required parameter: scene_path")
+        print(JSON.stringify({"success": false, "error": "Missing required parameter: scene_path"}))
+        return
+
+    log_info("Painting tilemap in scene: " + scene_path + " mode: " + mode)
+
+    # Load the scene
+    var scene = load(scene_path)
+    if not scene:
+        log_error("Failed to load scene: " + scene_path)
+        print(JSON.stringify({"success": false, "error": "Failed to load scene: " + scene_path}))
+        return
+
+    var scene_root = scene.instantiate()
+
+    # Find the TileMapLayer node
+    var target = find_node_by_path(scene_root, node_path)
+    if not target:
+        log_error("Node not found: " + node_path)
+        print(JSON.stringify({"success": false, "error": "Node not found: " + node_path}))
+        return
+
+    if not target is TileMapLayer:
+        log_error("Target node is not a TileMapLayer: " + node_path)
+        print(JSON.stringify({"success": false, "error": "Target node is not a TileMapLayer: " + node_path}))
+        return
+
+    var result_json = {}
+
+    match mode:
+        "paint":
+            var cells = params.get("cells", [])
+            for cell in cells:
+                var pos = Vector2i(int(cell.get("x", 0)), int(cell.get("y", 0)))
+                var source_id = int(cell.get("source_id", 0))
+                var atlas_coords = Vector2i(int(cell.get("atlas_x", 0)), int(cell.get("atlas_y", 0)))
+                var alternative_tile = int(cell.get("alternative_tile", 0))
+                target.set_cell(pos, source_id, atlas_coords, alternative_tile)
+            result_json = {"success": true, "cells_painted": cells.size()}
+
+        "fill":
+            var x_start = int(params.get("x_start", 0))
+            var y_start = int(params.get("y_start", 0))
+            var x_end = int(params.get("x_end", 0))
+            var y_end = int(params.get("y_end", 0))
+            var source_id = int(params.get("source_id", 0))
+            var atlas_x = int(params.get("atlas_x", 0))
+            var atlas_y = int(params.get("atlas_y", 0))
+            var alternative_tile = int(params.get("alternative_tile", 0))
+            var count = 0
+            for y in range(y_start, y_end + 1):
+                for x in range(x_start, x_end + 1):
+                    target.set_cell(Vector2i(x, y), source_id, Vector2i(atlas_x, atlas_y), alternative_tile)
+                    count += 1
+            result_json = {"success": true, "cells_filled": count}
+
+        "clear":
+            var cells = params.get("cells", [])
+            if cells.is_empty():
+                target.clear()
+                result_json = {"success": true, "cleared": "all"}
+            else:
+                for cell in cells:
+                    target.erase_cell(Vector2i(int(cell.get("x", 0)), int(cell.get("y", 0))))
+                result_json = {"success": true, "cleared": cells.size()}
+
+        _:
+            log_error("Unknown paint_tilemap mode: " + mode)
+            print(JSON.stringify({"success": false, "error": "Unknown mode: " + mode}))
+            return
+
+    # Pack and save scene
+    var packed_scene = PackedScene.new()
+    var pack_result = packed_scene.pack(scene_root)
+    if pack_result != OK:
+        log_error("Failed to pack scene after painting tilemap: " + str(pack_result))
+        print(JSON.stringify({"success": false, "error": "Failed to pack scene: " + str(pack_result)}))
+        return
+
+    var save_error = ResourceSaver.save(packed_scene, scene_path)
+    if save_error != OK:
+        log_error("Failed to save scene: " + str(save_error))
+        print(JSON.stringify({"success": false, "error": "Failed to save scene: " + str(save_error)}))
+        return
+
+    print(JSON.stringify(result_json))
