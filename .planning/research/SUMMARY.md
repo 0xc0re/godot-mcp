@@ -1,225 +1,232 @@
 # Project Research Summary
 
-**Project:** godot-mcp — MCP server for Godot Engine
-**Domain:** MCP server / game engine integration (TypeScript/Node.js + Godot 4.x)
+**Project:** godot-mcp v2.0 Enhancements
+**Domain:** MCP server for Godot 4.x — autonomous AI game development tooling
 **Researched:** 2026-03-03
-**Confidence:** HIGH
+**Confidence:** HIGH (stack verified against live codebase and Godot 4.6.1 binary; architecture confirmed against live project files; pitfalls cross-referenced with official Godot issue tracker)
 
 ## Executive Summary
 
-The godot-mcp project is a Model Context Protocol server that lets AI assistants (Claude Code, Cline, Cursor) interact with the Godot 4.x game engine. The current implementation has a critical blocking bug: it uses MCP SDK v0.6.0 which speaks protocol version `2024-11-05`, but Claude Code expects `2025-03-26`. This protocol mismatch causes all tools to be invisible in Claude Code — zero functionality works for Claude Code users today. Fixing this is not optional and is the mandatory first action. The upgrade to SDK 1.27.1 is the unlock that makes every other improvement matter.
+This is a v2.0 expansion of an already-shipped MCP server that enables Claude to autonomously build Godot 4.x games. The v1.0 baseline (27 tools) is validated and stable. The v2.0 work adds 11 new capability areas: signal connections, scene instancing, batch property operations, node groups, input action management, animation tools, TileMap/TileSet operations, shader file management, DAP runtime inspection, headless export, and hot-reload. The existing architecture — TypeScript tool handlers dispatching to a GDScript headless subprocess via `executeOperation()` — is sound and extends cleanly to all new features with one exception: runtime inspection requires a different execution model (TCP connection or file-polling IPC to a running game, not a headless subprocess).
 
-Beyond the SDK fix, the current server has 12 working tools but is behind every significant competitor in scene inspection and manipulation. Competitors like tugcantopaloglu (149 tools) and GoPeak (95 tools) all implement headless scene tree read/modify — features that are absent here. The competitive gap is bridgeable in a focused v1 push: add read_scene, modify node properties, remove node, attach script to node, and GDScript parse error scanning. The target tool count is ~30 focused tools, not 100+. The competitor with 149 tools destroys context budget and degrades LLM accuracy; quality beats quantity here.
+The recommended implementation order follows dependency depth and risk. Seven features (signal connections, scene instancing, batch properties, node groups, input actions, shader management, headless export) are P1: they extend existing patterns directly and have HIGH confidence. Three features (animation tools, TileMap/TileSet, DAP runtime inspection) are P2: they follow established patterns but involve more complex Godot subsystems or headless edge cases that need validation. Hot-reload is P3: Godot 4.x hot-reload from external tools is unreliable by design — confirmed across multiple open Godot issues — and the recommended approach is "write file + restart project" rather than true live script injection.
 
-The architecture requires a simultaneous refactor: the current 2000+ line monolithic `index.ts` cannot be safely extended without turning into an unmaintainable ball of mud. The refactor to domain-based tool modules (`src/tools/project/`, `src/tools/scene/`, `src/tools/script/`, `src/tools/asset/`) is not a luxury — it is the prerequisite for adding any new tools cleanly. The recommended approach is to do the SDK upgrade and architectural refactor together in Phase 1, migrate existing tools into the new structure, then build new capabilities on the clean foundation.
+The single most important constraint discovered: Godot 4's runtime debug protocol is proprietary (NOT standard DAP), and a DAP regression in Godot 4.5+ disconnects external clients before the project boots. The file-polling pattern (mirroring `screenshot_helper.gd`) is the lower-risk implementation path for runtime scene inspection. Additionally, `TileMap` is deprecated in Godot 4.3+ — all tilemap tools must target `TileMapLayer` exclusively from the start. Two Godot-specific serialization traps — the `CONNECT_PERSIST` flag for signal persistence and `GEN_EDIT_STATE_INSTANCE` for scene instancing — will cause silent data loss if missed during implementation.
 
 ## Key Findings
 
 ### Recommended Stack
 
-The stack upgrade is small in scope but large in impact. The only mandatory package change is upgrading `@modelcontextprotocol/sdk` from 0.6.0 to 1.27.1 and adding `zod@^3.25` as an explicit peer dependency. The new SDK's `McpServer` class replaces the old `Server` class; `registerTool()` replaces the deprecated `server.tool()` and the manual `setRequestHandler(ListToolsRequestSchema)` / `setRequestHandler(CallToolRequestSchema)` split. Adding `@fernforestgames/godot-resource-parser@0.1.3` enables TypeScript-native `.tscn`/`.tres` parsing without writing a custom parser. Removing `axios` (unused, 50KB+) is a free win. All Godot CLI interactions use the existing `execFile` security pattern; that is correct and should not be changed.
+The v2.0 expansion requires only **one new npm dependency**: `@vscode/debugprotocol@^1.68.0` (TypeScript type declarations for the DAP wire protocol, maintained by Microsoft, zero runtime overhead). Every other v2.0 feature extends existing patterns without new packages. The existing stack — `@modelcontextprotocol/sdk ^1.27.1`, `zod ^3.25.76`, `TypeScript ^5.3.3`, `@fernforestgames/godot-resource-parser 0.1.3`, `vitest ^4.0.18` — covers all new functionality. Attempts to find purpose-built Godot TypeScript libraries for animation or tilemap manipulation found none; GDScript via `godot_operations.gd` is the only viable path for all Godot-native operations.
 
-**Core technologies:**
-- `@modelcontextprotocol/sdk@1.27.1`: MCP protocol — mandatory upgrade; v0.6.0 is the direct cause of Claude Code tool invisibility
-- `zod@^3.25`: Schema validation — required peer dep of SDK 1.x; needed for `registerTool()` input schemas
-- `TypeScript@5.9.3`: Type safety — minor upgrade from 5.3.3; cheap and adds recent type features
-- `Node.js >=18 (20 LTS preferred)`: Runtime — existing constraint; Node 20 avoids `globalThis.crypto` polyfill for optional auth features
-- `@fernforestgames/godot-resource-parser@0.1.3`: `.tscn`/`.tres` parsing — TypeScript-native, zero dependencies, read-only, Godot 4 format only
-- `Godot 4.6.1` (host-installed at `/usr/bin/godot`): Target engine — all `--headless`, `--script`, `--check-only` flags verified against installed binary
+**Core technologies (existing — do not change):**
+- `@modelcontextprotocol/sdk ^1.27.1`: MCP server, tool registration — established, working
+- `zod ^3.25.76`: Input schema validation — all new tools follow existing zod schema pattern
+- `GDScript (godot_operations.gd)`: Headless write operations — extend with ~8 new `match` cases
+- `@fernforestgames/godot-resource-parser 0.1.3`: .tscn/.tres read parsing — extend tscn-parser.ts to surface connections[]
+
+**New addition:**
+- `@vscode/debugprotocol@^1.68.0`: TypeScript DAP type definitions — types only, no runtime; models `src/dap/client.ts` after `src/lsp/client.ts`
+
+**Critical version notes:**
+- `TileMapLayer` requires Godot 4.3+ — document as minimum version for tilemap tools
+- `--dap-port` flag available in Godot 4.1+; verified present in Godot 4.6.1
+- DAP regression in Godot 4.5+/master affects external client connections — target Godot 4.4.x for DAP features
 
 ### Expected Features
 
-The feature research identifies a clear P1 set that makes the product competitive, a P2 set that adds depth, and a P3 set to defer. The SDK fix is a prerequisite for all features — without it, the tool count is irrelevant.
+**Must have — P1 (table stakes, extend existing patterns):**
+- Signal connections (`connect_signal`, `disconnect_signal`) — game logic wiring; `CONNECT_PERSIST` flag required for .tscn persistence or connection is silently discarded
+- Scene instancing (`instance_scene`) — core Godot reuse pattern; `PackedScene.instantiate(GEN_EDIT_STATE_INSTANCE)` + `set_owner()` required
+- Batch property operations (`batch_set_properties`) — eliminate 200ms-per-property subprocess overhead; single GDScript invocation for N changes
+- Node groups (`add_node_to_group`, `remove_node_from_group`) — game tagging system; `groups=[]` in .tscn node header
+- Input action management (`manage_input_action`) — essential for game scaffolding; must use `ProjectSettings.save()`, NOT runtime InputMap (runtime-only, not persisted)
+- Shader file management (`create_shader_file`, `create_shader_material`) — .gdshader is plain text (TypeScript `fs.writeFileSync`); ShaderMaterial .tres via existing `create_resource` pattern
+- Headless export (`export_project`) — `--export-release` CLI invocation; 180s timeout; pre-flight validation of export_presets.cfg and templates required
 
-**Must have (table stakes / P1):**
-- SDK upgrade to 1.27.1 — blocks every other feature; zero tools visible without it
-- Read scene tree as JSON (headless) — every competitor has this; its absence is the biggest functional gap
-- Modify node properties headlessly — required for iterative scene building
-- Remove node from scene — required for scene refactoring
-- Attach script to node — required to wire up game logic during AI-directed scene creation
-- Scan for GDScript parse errors (`godot --check-only --headless`) — low cost, high signal
-- Read project.godot settings — enables AI to understand autoloads, input maps, rendering config
-- Improved error messages — actionable guidance instead of raw Godot stderr
+**Should have — P2 (higher complexity, need validation):**
+- Animation tools (`create_animation_library`, `add_animation_track`) — AnimationPlayer/AnimationLibrary API; headless AnimationPlayer node lifecycle needs testing
+- TileMap/TileSet operations (`configure_tileset`, `set_tile_cell`) — `TileMapLayer` API (Godot 4.3+); headless texture loading for TileSet needs validation
+- DAP runtime inspection (`inspect_runtime_scene`) — file-polling approach preferred over raw TCP (Godot debug protocol is proprietary, NOT standard DAP)
 
-**Should have (competitive / P2):**
-- Modify project.godot settings — needed for project scaffolding
-- Create/read resource files (.tres) — needed for real game work with materials and atlases
-- List scripts with structure summary — reduces AI back-and-forth on project orientation
-- MCP resources (`godot://scene/current` for `@mention` context) — ee0pdt implements this
-- GDScript diagnostics via LSP — high value but requires editor running; add as optional enhancement
-
-**Defer (v2+):**
-- ClassDB introspection — reduces hallucination on property names; complex to implement cleanly
-- Runtime scene tree inspection via DAP — high complexity, requires debugger protocol
-- Screenshot capture — window management complexity; niche use case
-- Export project headlessly — CI/CD use case; valuable but niche for MCP workflow
-- Tool search / pagination — only needed if tool count exceeds ~30
-
-**Anti-features to avoid:**
-- 100+ tools in one server — destroys context budget; target ~30 focused tools
-- Arbitrary GDScript eval — shell injection vector; expose parameterized operations instead
-- Godot 3.x support — incompatible APIs; document 4.x requirement and move on
-- HTTP transport — local tool; stdio is correct
+**Defer to v2.x+:**
+- Hot-reload GDScript — implement as "write file + stop/run cycle"; true in-process reload not reliably achievable from external tools
+- AnimationTree/StateMachine — too complex for autonomous operation; editor-only visual work
+- Full tilemap painting for large maps — needs bulk `set_tile_region()` operation to be token-efficient
 
 ### Architecture Approach
 
-The target architecture is a domain-modular Node.js process communicating via MCP stdio JSON-RPC. The key structural change is splitting the monolithic `src/index.ts` into a thin entry point plus domain-scoped tool modules (`src/tools/project/`, `src/tools/scene/`, `src/tools/script/`, `src/tools/asset/`). Shared infrastructure (Godot process management, path detection, parameter validation) lives in `src/core/` and is injected into tool modules via a `CoreServices` container. GDScript-side operations remain in a single dispatch script (`src/scripts/godot_operations.gd`) that receives operation name + JSON params as CLI args. File operations that do not require Godot's scene API (directory listing, raw file reads) are handled directly in Node.js to avoid the 200-400ms per-spawn overhead.
+The architecture is an extension of the existing pattern: TypeScript tool modules dispatch operations to `godot_operations.gd` via `executeOperation()`, which spawns a headless Godot subprocess. Four new tool modules (`animation.ts`, `tilemap.ts`, `runtime.ts`, `export.ts`) join the existing `scene.ts` and `project.ts` (each extended with new tools). The GDScript backend gains ~8 new `match` cases. Runtime inspection breaks the pattern by using file-polling IPC (mirroring `screenshot_helper.gd`) rather than a headless subprocess — Godot's runtime debug protocol is proprietary and has an active regression. Export also breaks the pattern by calling `execGodot` directly with `--export-release` flags and a 180s timeout (no GDScript script needed).
 
 **Major components:**
-1. `src/index.ts` (~50 lines after refactor) — entry point: create `McpServer`, connect `StdioServerTransport`, call each tool registration function
-2. `src/core/` — `GodotProcessManager` (execFile/spawn wrapper + active process state), `PathManager` (Godot binary detection + caching), `Validator` (path traversal prevention), `CoreServices` interface
-3. `src/tools/<domain>/` — one file per domain; each exports `registerXxxTools(server, core)` that calls `server.registerTool()` for all tools it owns
-4. `src/scripts/godot_operations.gd` — GDScript dispatcher; receives operation + JSON params from CLI args, executes Godot API calls, prints results to stdout, calls `get_tree().quit()` in all exit paths
+1. `src/tools/scene.ts` (EXTEND) — add connect_signal, instance_scene, set_node_groups, batch_set_properties (4 new tools)
+2. `src/tools/project.ts` (EXTEND) — add manage_input_action (1 new tool)
+3. `src/tools/animation.ts` (NEW) — create_animation_library, add_animation_track via executeOperation
+4. `src/tools/tilemap.ts` (NEW) — configure_tileset, set_tile_cell via executeOperation
+5. `src/tools/runtime.ts` (NEW) — inspect_runtime_scene via file-polling IPC (runtime_helper.gd autoload)
+6. `src/tools/export.ts` (NEW) — export_project via execGodot with 180s timeout and pre-flight checks
+7. `src/parsers/tscn-parser.ts` (EXTEND) — surface connections[] in ParsedScene (data already in .tscn files, just not exposed)
+8. `src/scripts/godot_operations.gd` (EXTEND) — ~8 new operation functions in match block
+
+**Key patterns by execution model:**
+- All write operations: `executeOperation()` → GDScript match block → load scene → modify → `ResourceSaver.save()` → return JSON
+- Shader .gdshader files: TypeScript `fs.writeFileSync` directly (plain text, no GDScript needed)
+- Export: `execGodot(['--export-release', preset, output], { timeout: 180_000 })` (no GDScript script involved)
+- Runtime inspection: file-polling trigger/response pattern — NOT TCP to undocumented Godot protocol
 
 ### Critical Pitfalls
 
-1. **stdout pollution breaks JSON-RPC silently** — Any `console.log()` to stdout corrupts the MCP stdio transport; symptoms are tools not appearing or intermittent disconnects. Prevention: use `console.error()` everywhere; add ESLint rule banning `console.log` in server code; verify no imported library prints to stdout on import.
+1. **CONNECT_PERSIST flag missing in signal connections** — `node.signal_name.connect(target.method)` creates a runtime-only connection that is silently discarded when `ResourceSaver.save()` serializes the scene. Always pass `CONNECT_PERSIST` (constant value 2) in godot_operations.gd. Verify the saved .tscn contains `[connection signal=...]` lines after save. Tool returns "success" even when the connection is silently lost.
 
-2. **SDK 0.6.0 protocol mismatch with Claude Code** — This is the current live bug. SDK 0.6.0 sends `protocolVersion: "2024-11-05"`; Claude Code expects `"2025-03-26"`. All tools are invisible. Fix: upgrade to SDK 1.27.1, switch to `McpServer` + `registerTool()`, verify with Claude Code (not just Inspector — Inspector has different version requirements).
+2. **GEN_EDIT_STATE_INSTANCE missing in scene instancing** — `load(path).instantiate()` without this flag creates an instance whose property overrides are not serialized correctly. Always use `load(path).instantiate(PackedScene.GEN_EDIT_STATE_INSTANCE)` and call `set_owner(scene_root)` on every child node recursively. Verify .tscn shows `instance=ExtResource(...)` not inlined node definitions.
 
-3. **Godot headless buffer overflow causes hangs** — `execFile` with default buffer limits hangs when Godot produces large output (import logs, verbose errors). Prevention: always set `{ maxBuffer: 10 * 1024 * 1024, timeout: 30000 }` on all `execFileAsync` calls; remove the hardcoded `GODOT_DEBUG_MODE = true` constant.
+3. **Batch operations implemented as TypeScript loop** — Calling `executeOperation()` N times in TypeScript defeats the purpose; each call spawns a Godot subprocess at ~200ms. The `batch_set_properties` operation must be a single new GDScript function that accepts an array of `{node_path, property, value}` tuples and processes all of them in one subprocess invocation. One subprocess for N properties — not N subprocesses.
 
-4. **GDScript operations script hangs if `quit()` is not called** — Godot's engine loop does not exit when a script finishes. Every code path in `godot_operations.gd` including error paths must call `get_tree().quit()`. New operations added to this file are at risk.
+4. **DAP runtime inspection using headless subprocess** — A headless `--script` Godot process has no scene tree and no remote debugger endpoint. DAP inspection requires connecting to a running game launched with `--remote-debug`. Additionally, Godot's debug protocol is proprietary (not standard DAP despite using port 6007); use the file-polling approach (runtime_helper.gd) instead of attempting TCP protocol implementation. Godot 4.5+ has a confirmed regression where external DAP clients disconnect before project boots.
 
-5. **Claude Code strict schema validation breaks tool registration** — Claude Code v2.0.21+ rejects `inputSchema` with `oneOf`/`anyOf`/`allOf` at root level. Keep all schemas as flat `{ type: "object", properties: {...}, required: [...] }`. Validate all tool schemas in CI.
+5. **Headless export silent failures** — Godot often exits code 0 even when export fails. Always validate preconditions before invoking export (export_presets.cfg exists, preset name matches exactly, export templates installed in `~/.local/share/godot/export_templates/`), parse stdout for known error strings, and verify the output file exists with non-zero size after export completes.
+
+6. **TileMap vs TileMapLayer API** — `TileMap` is deprecated in Godot 4.3+; the API changed significantly (`set_cell` signature is different; data serialization changed from int32 to PackedByteArray). All tilemap tools must target `TileMapLayer` exclusively from the start. Document Godot 4.3+ as minimum version for tilemap features.
+
+7. **Input action persistence via runtime InputMap** — `InputMap.add_action()` modifies the runtime singleton only; it is NOT persisted when the headless Godot process exits. Must use `ProjectSettings.set("input/action_name", {...})` followed by `ProjectSettings.save()` in GDScript to write the `Object(InputEventKey,...)` format correctly into project.godot. The format is too complex to emit safely from TypeScript string templates.
 
 ## Implications for Roadmap
 
-Based on research, the dependency graph dictates a clear 4-phase structure. The SDK fix and architectural refactor are coupled: doing them together in Phase 1 reduces total work and risk compared to doing them sequentially.
+Based on combined research, the natural phase structure follows dependency depth, risk level, and grouping by execution model. Phases 1-2 cover all P1 features using familiar patterns. Phase 3 covers P2 features requiring deeper Godot subsystem knowledge. Phase 4 is the highest-risk feature (runtime inspection). Phase 5 is documentation of a known limitation.
 
-### Phase 1: Foundation — SDK Upgrade + Architectural Refactor
+### Phase 1: Core Scene Composition Primitives
 
-**Rationale:** The SDK version mismatch is a hard blocker: zero tools work in Claude Code until it is fixed. The monolithic architecture cannot safely accommodate the new tools needed in Phase 2 without first being split into modules. These two concerns are coupled — upgrading the SDK requires changing the registration API, which is the same work as the modular refactor. Do them together.
+**Rationale:** Signal connections, scene instancing, node groups, and batch property operations all extend existing `scene.ts` + `godot_operations.gd` patterns with HIGH confidence. They are the fundamental game-building primitives that unlock all downstream AI-assisted content creation. These are table-stakes features — competitors (GoPeak, tugcantopaloglu) all have them. The tscn-parser.ts extension for connections[] is a natural companion (read what you write).
 
-**Delivers:**
-- All 12 existing tools working correctly in Claude Code (tool discovery fixed)
-- Modular codebase ready for extension
-- Core infrastructure (`GodotProcessManager`, `PathManager`, `Validator`) extracted and testable
-- `execFileAsync` hardened with `maxBuffer`, `timeout`, and `SIGTERM` cleanup
-- `GODOT_DEBUG_MODE` converted from hardcoded constant to env variable
-- ESLint rule banning `console.log` in server code
-- All `godot_operations.gd` exit paths audited for `get_tree().quit()`
+**Delivers:** Complete scene wiring capability — AI can connect nodes, instantiate subscenes, tag nodes with groups, and set multiple properties efficiently in a single subprocess call.
 
-**Addresses from FEATURES.md:** SDK compatibility (P1 blocker), improved error messages (P1)
+**Addresses:** signal connections (P1), scene instancing (P1), batch property operations (P1), node groups (P1)
 
-**Stack changes:** `@modelcontextprotocol/sdk` 0.6.0 → 1.27.1, add `zod@^3.25`, remove `axios`, upgrade `typescript` and `@types/node`
+**Avoids:** CONNECT_PERSIST omission (Pitfall 7), GEN_EDIT_STATE_INSTANCE omission (Pitfall 8), batch-as-TypeScript-loop anti-pattern (Pitfall 9)
 
-**Avoids:** Pitfalls 1 (stdout pollution), 2 (protocol mismatch), 3 (schema validation), 4 (buffer overflow), 5 (GDScript hangs)
+**Architecture:** Extends scene.ts + godot_operations.gd + tscn-parser.ts (surface connections[]). No new modules needed.
 
-**Research flag:** Standard patterns — well-documented SDK migration path; no additional research needed.
+**Research flag:** Standard patterns — skip research-phase. Implementation is HIGH confidence; patterns verified against live .tscn files and existing codebase.
 
----
+### Phase 2: Project Configuration and Asset Management
 
-### Phase 2: Scene Intelligence — Headless Scene Read/Modify
+**Rationale:** Input action management (project.godot write), shader file management (fs write + create_resource), and headless export (execGodot with flags) are independent of Phase 1 features and complete the "project scaffolding" capability set. Headless export is uniquely valuable — neither GoPeak nor tugcantopaloglu implements it, making it a genuine competitive differentiator.
 
-**Rationale:** Scene inspection and manipulation is the single largest functional gap versus competitors. Every alternative implementation has headless scene read. Without it, the AI cannot safely modify what it cannot read. These features have clear, well-defined Godot API operations (ResourceLoader, PackedScene, Node manipulation) and the `godot_operations.gd` dispatch pattern is ready to receive them.
+**Delivers:** Complete project configuration — AI can define input bindings, create shader files and materials, and build exportable game artifacts.
 
-**Delivers:**
-- `read_scene` — return scene tree as JSON (node names, types, properties)
-- `modify_node` — set properties on named nodes headlessly
-- `remove_node` — remove a node from scene by path
-- `attach_script` — attach a GDScript file to a named node
-- `read_project_settings` — parse `project.godot` and return key settings
-- `scan_scripts` — batch GDScript parse error check via `godot --check-only --headless`
-- `@fernforestgames/godot-resource-parser` integrated for Node.js-side `.tscn` inspection
+**Addresses:** input action management (P1), shader file management (P1), headless export (P1)
 
-**Addresses from FEATURES.md:** All P1 features remaining after Phase 1
+**Avoids:** Runtime InputMap persistence trap (Pitfall 14), export silent failure (Pitfall 11), 30s timeout for export operations (Architecture anti-pattern 4)
 
-**Uses from STACK.md:** `@fernforestgames/godot-resource-parser`, `godot --check-only --headless --script` flags
+**Architecture:** Extends project.ts (input actions via ProjectSettings.save()); extends scene.ts or resource.ts (shader file TypeScript write + ShaderMaterial via create_resource); new export.ts module with 180s timeout and pre-flight validation.
 
-**Implements from ARCHITECTURE.md:** Extended `godot_operations.gd` dispatch; `src/tools/scene/` module; distinction between Godot-native ops (use execFile) and filesystem-native ops (use Node.js directly)
+**Research flag:** Standard patterns — skip research-phase. Input action format verified against live bfg/project.godot file. Export CLI syntax confirmed in Godot 4.6.1 binary help output. Shader files are plain text.
 
-**Avoids:** Pitfall 4 (buffer overflow on scene dumps), Pitfall 5 (GDScript quit() in new operations)
+### Phase 3: Complex Godot Subsystems (Animation + TileMap)
 
-**Research flag:** Needs phase research — headless scene manipulation via GDScript has edge cases (import cache, ExtResource ID management, property path syntax). Research `godot_operations.gd` implementation patterns and `.tscn` write-back format before implementation.
+**Rationale:** Animation tools and TileMap/TileSet operations follow the same `executeOperation()` pattern as Phases 1-2 but involve more complex Godot resource hierarchies: AnimationLibrary → Animation → typed tracks, and TileSet → TileSetAtlasSource → TileMapLayer. These are P2 features with HIGH user value but MEDIUM implementation confidence due to unresolved headless edge cases — specifically, whether textures load correctly when creating TileSets without a display server.
 
----
+**Delivers:** Game content creation — AI can create animated characters (AnimationPlayer with typed keyframe tracks) and build tile-based levels (TileMapLayer with TileSet atlas sources).
 
-### Phase 3: Project Scaffolding + Script Intelligence
+**Addresses:** animation tools (P2), TileMap/TileSet operations (P2)
 
-**Rationale:** With scene tools working, the natural next expansion is project-level configuration and script-level intelligence. These enable the AI to scaffold new projects from scratch (project settings, autoloads) and to understand script structure (exports, signals) without reading entire files. These features are additive — they do not depend on each other.
+**Avoids:** TileMap deprecation trap (Pitfall 13); headless texture loading edge case (needs validation)
 
-**Delivers:**
-- `modify_project_settings` — configure autoloads, input maps, render mode via `project.godot`
-- `create_resource` / `read_resource` — create and inspect `.tres` material/resource files
-- `list_scripts_summary` — return script files with their class name, exports, signals, and methods
-- MCP resources (`godot://scene/current`, `godot://script/<path>`) for Claude Code `@mention` support
+**Architecture:** New animation.ts and tilemap.ts modules; extend godot_operations.gd with create_animation, add_animation_track, configure_tileset, set_tile_cell operations.
 
-**Addresses from FEATURES.md:** All P2 features
+**Research flag:** Needs `/gsd:research-phase`. Two open questions: (1) headless AnimationPlayer node lifecycle — does the AnimationPlayer need to exist in the scene tree before library assignment in headless mode? (2) TileSet texture loading without display server — does `load("res://tiles.png")` return a valid Texture2D in headless Godot? If textures fail, scope tilemap to "paint cells on a pre-existing TileSet" only.
 
-**Research flag:** Needs phase research — MCP Resources protocol (`resources/list`, `resources/read`) is separate from Tools; implementation pattern needs verification against SDK 1.27.1 `McpServer` API.
+### Phase 4: Runtime Inspection
 
----
+**Rationale:** DAP-based runtime scene inspection is the highest-risk feature in the entire v2.0 scope. It requires a fundamentally different execution model (connecting to a running game process, not spawning a headless subprocess), Godot's debug protocol is proprietary, and there is a confirmed regression in Godot 4.5+ that disconnects external clients before the project boots. Build last, after all file-system-based features are stable and the implementation approach is validated.
 
-### Phase 4: Diagnostics + Advanced Integration
+**Delivers:** Live game observability — AI can inspect the running scene tree and variable state without stopping the game, enabling debugging and verification of game behavior.
 
-**Rationale:** High-complexity features that require external services (Godot LSP) or introduce new integration surfaces (DAP debugger protocol). These are v2+ features deferred until P1/P2 prove stable.
+**Addresses:** DAP runtime inspection (P2)
 
-**Delivers:**
-- GDScript diagnostics via LSP (type errors, undefined variables) — requires Godot editor running with LSP on port 6005
-- ClassDB introspection ("what properties does CharacterBody2D have?") — reduces AI hallucination on Godot API
-- Runtime scene tree inspection via DAP — walk live scene tree during running game
+**Avoids:** Headless subprocess for DAP (Architecture anti-pattern 3), proprietary protocol implementation risk (Pitfall 10), Godot 4.5+ DAP regression impact
 
-**Addresses from FEATURES.md:** P3 features
+**Architecture:** New runtime.ts module using file-polling IPC (runtime_helper.gd autoload writes scene_tree.json when trigger file is written); extend ServerContext with optional dapProcess field; add cleanup in index.ts shutdown handler.
 
-**Research flag:** Needs phase research — LSP and DAP protocol integration are complex external integrations with sparse community documentation. Verify Godot LSP wire protocol and Claude Code session lifecycle before committing to implementation approach.
+**Research flag:** Needs `/gsd:research-phase`. Must verify: (1) Godot 4.5+ DAP regression status as of implementation time (if fixed, TCP approach becomes viable), (2) file-polling approach feasibility — does `get_tree().root` provide sufficient scene data in a running game autoload?, (3) godot-vscode-plugin source for proprietary protocol details if TCP approach is reconsidered. Treat as a feasibility spike — be prepared to scope down or defer if neither approach is reliable.
 
----
+### Phase 5: Hot-Reload (Documentation + Controlled Restart)
+
+**Rationale:** True in-process hot-reload from an external tool is not reliably achievable in Godot 4.x — confirmed by multiple open official issues (#72825, #49298, #10946, #105667). The correct scoping is "write file + stop_project + run_project" with clear documentation of what this does and does not do. The value is in the documentation and user guidance, not in new technical implementation.
+
+**Delivers:** Documented hot-reload workflow — "write + restart" cycle with actionable user guidance on what Godot can and cannot do with external file changes.
+
+**Addresses:** hot-reload GDScript (P3)
+
+**Avoids:** Promising hot-reload behavior Godot cannot reliably deliver (Architecture anti-pattern 5), LSP timestamp race condition (Pitfall 12)
+
+**Architecture:** Minimal — the write and stop/run operations already exist. Add tool documentation and return guidance in tool descriptions.
+
+**Research flag:** Standard patterns — no research needed. Limitation is definitively documented in Godot issue tracker.
 
 ### Phase Ordering Rationale
 
-- **Phase 1 before everything:** The SDK mismatch is a complete functional blocker. Nothing else ships to Claude Code users until Phase 1 is done.
-- **Phase 1 includes architecture refactor:** Adding new tools to the monolith causes technical debt to compound faster than features are added. Doing the refactor now costs less than doing it later with 20 tools to migrate.
-- **Phase 2 before Phase 3:** Scene tools are the highest-value gap and have clear implementation paths. Project scaffolding and script intelligence build on the scene foundation.
-- **Phase 4 deferred:** LSP/DAP integration introduces new external service dependencies and operational complexity. Deferring until Phases 1-3 are stable reduces risk.
-- **Tool count discipline throughout:** Target ~30 focused tools total. Stop before context budget becomes a problem. Tool Search can be added if count justifies it.
+- **Phase 1 before Phase 2:** Both are P1 features but scene primitives unblock AI content creation workflows immediately. In practice, Phases 1 and 2 could be tackled concurrently by different contributors since they touch different modules.
+- **Phase 1+2 before Phase 3:** Animation and TileMap tools depend on `add_node` (existing), `create_resource` (existing), and the `batch_set_properties` pattern from Phase 1 for efficient multi-property scene setup.
+- **Phase 3 before Phase 4:** Runtime inspection is the highest-risk feature. Build it after all file-system-based tools are validated and the project's patterns are fully established.
+- **Phase 5 last:** Lowest implementation value, well-understood limitation, minimal code change.
+- **Groupings by execution model:** Phases 1-3 all use the headless subprocess pattern. Phase 4 introduces the file-polling/TCP model. Keeping them separate makes the architectural difference explicit and keeps testing scope manageable per phase.
 
 ### Research Flags
 
-Phases likely needing deeper research during planning:
-- **Phase 2:** Headless scene manipulation via GDScript has edge cases (import cache requirement, ExtResource/SubResource ID management when modifying .tscn files, property path syntax for nested nodes). Research the `godot_operations.gd` patterns and `.tscn` write-back format before sprint planning.
-- **Phase 4:** LSP and DAP protocol integration with Godot 4.x are complex integrations. The GoPeak/HaD0Yun implementation is the primary reference but documentation is sparse. Research Godot LSP wire protocol and JSON-RPC over TCP before committing to scope.
+Phases needing `/gsd:research-phase` during planning:
+- **Phase 3 (Animation + TileMap):** Headless AnimationPlayer node lifecycle not validated — does AnimationPlayer need to exist in the instantiated scene, or can AnimationLibrary be saved as a standalone .tres? TileSet texture loading without display server is an unresolved question — may need to scope tilemap to "paint cells on pre-existing TileSet" if `load()` returns null textures in headless mode.
+- **Phase 4 (Runtime Inspection):** Godot 4.5+ DAP regression status is unknown at research time. File-polling vs TCP approach needs a feasibility spike. Proprietary Godot debug protocol requires study of godot-vscode-plugin source before implementation decisions.
 
 Phases with standard patterns (skip research-phase):
-- **Phase 1:** SDK migration is well-documented; `McpServer` + `registerTool()` migration path is clear from SDK README and type definitions. No unknowns.
-- **Phase 3:** MCP Resources protocol needs a quick lookup but is straightforward; project.godot is a well-documented text format; `.tres` creation follows the same pattern as `.tscn`.
+- **Phase 1 (Scene Composition):** All patterns verified against live .tscn files and live codebase. CONNECT_PERSIST and GEN_EDIT_STATE_INSTANCE flags documented clearly — implementation risk is known, not unknown.
+- **Phase 2 (Project Config + Export):** Input action format verified against live project.godot. Export CLI syntax confirmed against Godot 4.6.1 binary. Shader files are plain text with no Godot-specific serialization.
+- **Phase 5 (Hot-Reload):** Well-documented limitation; minimal implementation. No research needed.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | SDK versions verified via npm registry; Godot CLI flags verified directly against `/usr/bin/godot --help` on this machine; `@fernforestgames/godot-resource-parser` confirmed on npm and GitHub |
-| Features | HIGH (competitors), MEDIUM (Claude Code expectations) | Competitor analysis based on actual GitHub repos; Claude Code tool discovery behavior based on community issue tracker reports, not Anthropic official docs |
-| Architecture | HIGH (MCP SDK patterns), MEDIUM (Godot headless specifics) | MCP `McpServer`/`registerTool` pattern is from official SDK docs; GDScript dispatch pattern is well-established but specific edge cases (ExtResource ID stability) need Phase 2 research |
-| Pitfalls | HIGH | All major pitfalls verified across multiple sources: official GitHub issues, community reports, official MCP documentation |
+| Stack | HIGH | One new dependency (@vscode/debugprotocol types only). All others verified in existing codebase. Godot 4.6.1 flags verified against installed binary. No npm alternatives exist for Godot animation/tilemap — GDScript is confirmed only path. |
+| Features | HIGH | API verification from official Godot docs + live project file inspection (bfg game project). Feature scope clearly bounded by v1.0 baseline. Competitor comparison from live GitHub repos. DAP and headless animation are MEDIUM confidence. |
+| Architecture | HIGH | Live codebase inspection confirms all extension points. Data flow verified against actual .tscn, .tres, project.godot files from bfg project. Anti-patterns documented with specific pitfall references. |
+| Pitfalls | HIGH | Cross-referenced with official Godot issue tracker. Critical serialization traps (CONNECT_PERSIST, GEN_EDIT_STATE_INSTANCE) confirmed via official docs and community forum. DAP regression confirmed via issue reports. |
 
-**Overall confidence:** HIGH
+**Overall confidence:** HIGH for Phases 1, 2, 5. MEDIUM for Phase 3 (headless texture loading unresolved). MEDIUM-LOW for Phase 4 (proprietary protocol + active regression in Godot 4.5+).
 
 ### Gaps to Address
 
-- **Headless scene write-back stability:** Reading `.tscn` as text and writing back modifications risks corrupting ExtResource/SubResource ID references. The `@fernforestgames/godot-resource-parser` is read-only; write-back must use `godot_operations.gd`. The exact format Godot expects when a node's properties are modified needs Phase 2 research validation.
-- **Import cache requirement for headless ops:** Running `godot --headless --script` against a project that has never been opened in the editor will fail because the `.godot/` import cache does not exist. Phase 2 must handle this by running `godot --headless --editor --quit` or `--import` first. This is a known Godot issue (#83449) with no workaround in the CLI.
-- **Claude Code MCP Resources support:** MCP Resources (`resources/list`, `resources/read`) are a separate protocol surface from Tools. Confirm Claude Code supports subscribing to MCP resources before building Phase 3's `@mention` feature.
-- **Godot process lifecycle across Claude Code sessions:** Claude Code does not reliably terminate child MCP server processes on exit (documented issue #1935). The server must implement PID file tracking to clean up orphaned Godot processes from previous sessions. Design this in Phase 1, implement robustly in Phase 2.
+- **Headless TileSet texture loading:** Creating a TileSet programmatically in headless mode requires loading image textures — which may return null without a display server. Needs a spike: attempt `TileSetAtlasSource` creation with a real texture path in headless Godot 4.6.1 before committing to Phase 3 tilemap scope. If textures fail, scope tilemap to "paint cells on an existing TileSet" only.
+- **Godot 4.5+ DAP regression:** A confirmed disconnection regression exists in Godot 4.5+ for external DAP clients. Phase 4 planning must verify the regression status against the Godot version available at implementation time. If unresolved, file-polling is the only viable approach.
+- **Export templates detection path:** The `export_project` tool must verify export templates are installed before invoking Godot. The detection path `~/.local/share/godot/export_templates/<version>/` needs to be confirmed against Godot 4.6.1's actual storage location on this Linux machine before the Phase 2 implementation.
+- **Input action keycode mapping:** The `Object(InputEventKey,...)` format uses Godot `Key` enum integer values (W=87, A=65, D=68, Space=32). Exposing friendly key names (e.g., "W", "Space") requires a lookup table. Decide during Phase 2 planning whether to include a keycode map or document raw keycode usage only.
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- `npm info @modelcontextprotocol/sdk` — confirmed 1.27.1 is current stable
-- MCP SDK 1.27.1 package (local tar extract) — confirmed `McpServer`, `registerTool()`, zod peer dep, deprecated `server.tool()`
-- `/usr/bin/godot --help` (v4.6.1.stable, installed on this machine) — all CLI flags verified directly
-- [Claude Code MCP docs](https://code.claude.com/docs/en/mcp) — transport requirements, Tool Search, project-scope config
-- [MCP TypeScript SDK official docs](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/server.md) — `McpServer` pattern
+
+- `/usr/bin/godot --help` (Godot 4.6.1.stable, installed on this machine) — verified `--dap-port`, `--export-release`, `--export-debug`, `--export-pack`, `--headless` flags exist
+- `/home/cstory/src/godot-mcp/tests/fixtures/sample.tscn` — confirmed `[connection signal=... from=... to=... method=...]` format
+- `/home/cstory/src/bfg/scenes/game_scene.tscn` — confirmed `instance=ExtResource(...)` and `groups=["..."]` format in live bfg game project
+- `/home/cstory/src/bfg/project.godot` — confirmed `Object(InputEventKey,...)` input action serialization format
+- `/home/cstory/src/bfg/resources/tiles/dark_fantasy_tileset.tres` — confirmed TileSet/TileSetAtlasSource .tres format
+- Godot official docs: Signal.connect() + CONNECT_PERSIST flag, PackedScene.GEN_EDIT_STATE_INSTANCE, InputMap API, AnimationLibrary API, TileMapLayer API, command-line export flags (4.4 docs)
 
 ### Secondary (MEDIUM confidence)
-- [anthropics/claude-code GitHub issues](https://github.com/anthropics/claude-code/issues) — tool discovery bugs (#11175, #12164, #25440), orphaned processes (#1935), schema validation (#10606)
-- [tugcantopaloglu/godot-mcp](https://github.com/tugcantopaloglu/godot-mcp), [HaD0Yun/godot-mcp](https://github.com/HaD0Yun/godot-mcp), [ee0pdt/Godot-MCP](https://github.com/ee0pdt/Godot-MCP) — competitor feature analysis
-- [godotengine/godot-proposals #8664](https://github.com/godotengine/godot-proposals/discussions/8664) — headless `--script` execution model
-- [godotengine/godot #83449](https://github.com/godotengine/godot/issues/83449) — import cache requirement for headless ops
 
-### Tertiary (LOW confidence)
-- [GoPeak/GDAI MCP feature claims](https://gdaimcp.com/) — screenshot capture, DAP runtime inspection; not independently verified
-- [MCP Tool Search auto-activation at 10% context threshold](https://code.claude.com/docs/en/mcp) — mentioned in Claude Code docs but threshold not numerically confirmed in official source
+- [godot-vscode-plugin DAP DeepWiki](https://deepwiki.com/godotengine/godot-vscode-plugin/4-debugging) — DAP protocol pattern; proprietary protocol confirmed
+- [Godot Forum: AnimationPlayer via code](https://forum.godotengine.org/t/adding-an-animation-to-the-animationplayer-via-code/50043) — GDScript Animation API examples
+- [@vscode/debugprotocol on npm](https://www.npmjs.com/package/@vscode/debugprotocol) — version 1.68.0, maintained by Microsoft, TypeScript-only
+- [GoPeak/godot-mcp](https://github.com/HaD0Yun/godot-mcp) — competitor DAP implementation reference (port 6006)
+- [kidscancode InputMap recipe](https://kidscancode.org/godot_recipes/4.x/input/custom_actions/index.html) — InputEventKey.keycode pattern confirmed
+
+### Tertiary (HIGH confidence — official issue tracker)
+
+- [Godot hot-reload Issue #72825](https://github.com/godotengine/godot/issues/72825) — external editor hot-reload does not work (open as of 2026-03)
+- [Godot hot-reload Issue #105667](https://github.com/godotengine/godot/issues/105667) — static variable hot-reload broken in 4.3+
+- [Godot DAP Issue #94227](https://github.com/godotengine/godot/issues/94227) — DAP port 6007, TCP address confirmed
+- [Godot TileMap deprecation Issue #89012](https://github.com/godotengine/godot/issues/89012) — platform name change Linux/X11 → Linux in export presets (4.3)
+- [Web export Issue #97841](https://github.com/godotengine/godot/issues/97841) — Web export ZIP broken in Godot 4.3, fixed in 4.4+
 
 ---
 *Research completed: 2026-03-03*
