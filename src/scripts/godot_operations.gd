@@ -97,6 +97,14 @@ func _init():
             batch_set_properties(params)
         "manage_groups":
             manage_groups(params)
+        "add_input_action":
+            add_input_action(params)
+        "remove_input_action":
+            remove_input_action(params)
+        "create_shader_material":
+            create_shader_material(params)
+        "set_shader_params":
+            set_shader_params(params)
         _:
             log_error("Unknown operation: " + operation)
             quit(1)
@@ -2015,3 +2023,155 @@ func manage_groups(params):
         "node": params.node_path,
         "groups": target.get_groups()
     }))
+
+# Add an input action to ProjectSettings with support for key, joypad button, and joypad motion events
+func add_input_action(params):
+    var action_name = params.get("action_name", "")
+    if action_name == "":
+        log_error("Missing required parameter: action_name")
+        print(JSON.stringify({"success": false, "error": "Missing required parameter: action_name"}))
+        return
+
+    var events_data = params.get("events", [])
+    var deadzone = float(params.get("deadzone", 0.5))
+
+    log_info("Adding input action: " + action_name)
+
+    var events_array: Array[InputEvent] = []
+    for event_data in events_data:
+        var event_type = event_data.get("type", "")
+        match event_type:
+            "key":
+                var key_event = InputEventKey.new()
+                if event_data.has("key"):
+                    key_event.physical_keycode = OS.find_keycode_from_string(event_data.key)
+                elif event_data.has("physical_keycode"):
+                    key_event.physical_keycode = int(event_data.physical_keycode)
+                if event_data.has("keycode"):
+                    key_event.keycode = int(event_data.keycode)
+                events_array.append(key_event)
+            "joypad_button":
+                var btn_event = InputEventJoypadButton.new()
+                btn_event.button_index = int(event_data.get("button_index", 0))
+                events_array.append(btn_event)
+            "joypad_motion":
+                var motion_event = InputEventJoypadMotion.new()
+                motion_event.axis = int(event_data.get("axis", 0))
+                motion_event.axis_value = float(event_data.get("axis_value", 1.0))
+                events_array.append(motion_event)
+            _:
+                log_error("Unknown event type: " + event_type)
+                print(JSON.stringify({"success": false, "error": "Unknown event type: " + event_type}))
+                return
+
+    ProjectSettings.set_setting("input/" + action_name, {"deadzone": deadzone, "events": events_array})
+    var save_err = ProjectSettings.save()
+    if save_err != OK:
+        log_error("Failed to save ProjectSettings: " + str(save_err))
+        print(JSON.stringify({"success": false, "error": "Failed to save ProjectSettings: " + str(save_err)}))
+        return
+
+    print(JSON.stringify({"success": true, "action": action_name, "event_count": events_array.size()}))
+
+# Remove an input action from ProjectSettings
+func remove_input_action(params):
+    var action_name = params.get("action_name", "")
+    if action_name == "":
+        log_error("Missing required parameter: action_name")
+        print(JSON.stringify({"success": false, "error": "Missing required parameter: action_name"}))
+        return
+
+    log_info("Removing input action: " + action_name)
+
+    if not ProjectSettings.has_setting("input/" + action_name):
+        log_error("Input action not found: " + action_name)
+        print(JSON.stringify({"success": false, "error": "Input action not found: " + action_name}))
+        return
+
+    ProjectSettings.set_setting("input/" + action_name, null)
+    var save_err = ProjectSettings.save()
+    if save_err != OK:
+        log_error("Failed to save ProjectSettings: " + str(save_err))
+        print(JSON.stringify({"success": false, "error": "Failed to save ProjectSettings: " + str(save_err)}))
+        return
+
+    print(JSON.stringify({"success": true, "action": action_name}))
+
+# Create a ShaderMaterial from a shader file with optional parameters
+func create_shader_material(params):
+    var shader_path = ensure_res_prefix(params.get("shader_path", ""))
+    var output_path = ensure_res_prefix(params.get("output_path", ""))
+    var shader_params = params.get("shader_params", {})
+    var param_types = params.get("param_types", {})
+
+    if shader_path == "res://" or output_path == "res://":
+        log_error("Missing required parameters: shader_path and output_path")
+        print(JSON.stringify({"success": false, "error": "Missing required parameters: shader_path and output_path"}))
+        return
+
+    log_info("Creating shader material from: " + shader_path + " to: " + output_path)
+
+    var shader = load(shader_path) as Shader
+    if shader == null:
+        log_error("Failed to load shader: " + shader_path)
+        print(JSON.stringify({"success": false, "error": "Failed to load shader: " + shader_path}))
+        return
+
+    var material = ShaderMaterial.new()
+    material.shader = shader
+
+    for param_name in shader_params:
+        var type_hint = param_types.get(param_name, "")
+        var value = convert_json_to_godot_type(shader_params[param_name], type_hint)
+        material.set_shader_parameter(param_name, value)
+
+    # Ensure output directory exists
+    var dir_path = output_path.get_base_dir()
+    if not DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(dir_path)):
+        var dir = DirAccess.open("res://")
+        if dir:
+            var relative_dir = dir_path.substr(6)  # Remove "res://" prefix
+            if not relative_dir.is_empty():
+                dir.make_dir_recursive(relative_dir)
+
+    var error = ResourceSaver.save(material, output_path)
+    if error != OK:
+        log_error("Failed to save shader material: " + str(error))
+        print(JSON.stringify({"success": false, "error": "Failed to save shader material: " + str(error)}))
+        return
+
+    print(JSON.stringify({"success": true, "path": output_path}))
+
+# Set shader parameters on an existing ShaderMaterial resource
+func set_shader_params(params):
+    var material_path = ensure_res_prefix(params.get("material_path", ""))
+    var shader_params = params.get("shader_params", {})
+    var param_types = params.get("param_types", {})
+
+    if material_path == "res://":
+        log_error("Missing required parameter: material_path")
+        print(JSON.stringify({"success": false, "error": "Missing required parameter: material_path"}))
+        return
+
+    log_info("Setting shader params on: " + material_path)
+
+    var material = load(material_path) as ShaderMaterial
+    if material == null:
+        log_error("Failed to load ShaderMaterial: " + material_path)
+        print(JSON.stringify({"success": false, "error": "Failed to load ShaderMaterial: " + material_path}))
+        return
+
+    var count = 0
+    for param_name in shader_params:
+        var type_hint = param_types.get(param_name, "")
+        var value = convert_json_to_godot_type(shader_params[param_name], type_hint)
+        material.set_shader_parameter(param_name, value)
+        count += 1
+
+    var error = ResourceSaver.save(material, material_path)
+    if error != OK:
+        log_error("Failed to save shader material: " + str(error))
+        print(JSON.stringify({"success": false, "error": "Failed to save shader material: " + str(error)}))
+        return
+
+    print(JSON.stringify({"success": true, "path": material_path, "params_set": count}))
