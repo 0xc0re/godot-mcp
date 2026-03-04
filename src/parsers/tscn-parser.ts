@@ -40,11 +40,16 @@ function parseSectionHeader(line: string): SectionHeader | null {
   const attrStr = match[2]?.trim() || '';
   const attributes: Record<string, string> = {};
 
-  // Parse key="value" or key=value pairs
-  const attrRegex = /(\w+)=(?:"([^"]*?)"|(\S+))/g;
+  // Parse key=[array], key="value", or key=value pairs
+  const attrRegex = /(\w+)=(?:\[([^\]]*)\]|"([^"]*?)"|(\S+))/g;
   let attrMatch;
   while ((attrMatch = attrRegex.exec(attrStr)) !== null) {
-    attributes[attrMatch[1]] = attrMatch[2] ?? attrMatch[3];
+    if (attrMatch[2] !== undefined) {
+      // Array value -- store with brackets so callers can identify it
+      attributes[attrMatch[1]] = `[${attrMatch[2]}]`;
+    } else {
+      attributes[attrMatch[1]] = attrMatch[3] ?? attrMatch[4];
+    }
   }
 
   return { type, attributes };
@@ -139,6 +144,13 @@ function buildNode(attrs: Record<string, string>): SceneNode {
   if (attrs['type']) node.type = attrs['type'];
   if (attrs['parent']) node.parent = attrs['parent'];
   if (attrs['instance']) node.instance = attrs['instance'];
+  if (attrs['groups']) {
+    // Extract individual group names from the array string e.g. ["enemies", "targets"]
+    const groupMatches = attrs['groups'].match(/"([^"]*)"/g);
+    if (groupMatches) {
+      node.groups = groupMatches.map((g) => g.slice(1, -1));
+    }
+  }
   return node;
 }
 

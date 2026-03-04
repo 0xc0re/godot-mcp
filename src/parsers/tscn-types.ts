@@ -39,6 +39,7 @@ export interface SceneNode {
   type?: string;
   parent?: string;
   instance?: string;
+  groups?: string[];
   properties: Record<string, string>;
 }
 
