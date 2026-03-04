@@ -18,16 +18,16 @@ Requirements for v2.0 Enhancements milestone. Each maps to roadmap phases.
 
 ### Project Configuration
 
-- [ ] **CONF-01**: AI can add an input action with keyboard key binding to project.godot
-- [ ] **CONF-02**: AI can add an input action with joypad button/axis binding to project.godot
-- [ ] **CONF-03**: AI can remove an input action from project.godot
+- [x] **CONF-01**: AI can add an input action with keyboard key binding to project.godot
+- [x] **CONF-02**: AI can add an input action with joypad button/axis binding to project.godot
+- [x] **CONF-03**: AI can remove an input action from project.godot
 - [ ] **CONF-04**: AI can list all configured input actions with their bindings
 
 ### Shader Management
 
 - [ ] **SHDR-01**: AI can create a .gdshader file with specified shader_type and source code
-- [ ] **SHDR-02**: AI can create a ShaderMaterial resource (.tres) referencing a .gdshader file
-- [ ] **SHDR-03**: AI can set shader parameters on an existing ShaderMaterial resource
+- [x] **SHDR-02**: AI can create a ShaderMaterial resource (.tres) referencing a .gdshader file
+- [x] **SHDR-03**: AI can set shader parameters on an existing ShaderMaterial resource
 
 ### Animation
 
@@ -51,7 +51,7 @@ Requirements for v2.0 Enhancements milestone. Each maps to roadmap phases.
 
 ### Export
 
-- [ ] **EXPT-01**: AI can export a project headlessly for a named preset (Web, Linux, Windows, macOS)
+- [x] **EXPT-01**: AI can export a project headlessly for a named preset (Web, Linux, Windows, macOS)
 - [ ] **EXPT-02**: AI can validate export prerequisites before attempting (presets exist, templates installed)
 - [ ] **EXPT-03**: AI can list available export presets from export_presets.cfg
 
@@ -106,13 +106,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | COMP-04 | Phase 5 | Complete |
 | COMP-05 | Phase 5 | Complete |
 | COMP-06 | Phase 5 | Complete |
-| CONF-01 | Phase 6 | Pending |
-| CONF-02 | Phase 6 | Pending |
-| CONF-03 | Phase 6 | Pending |
+| CONF-01 | Phase 6 | Complete |
+| CONF-02 | Phase 6 | Complete |
+| CONF-03 | Phase 6 | Complete |
 | CONF-04 | Phase 6 | Pending |
 | SHDR-01 | Phase 6 | Pending |
-| SHDR-02 | Phase 6 | Pending |
-| SHDR-03 | Phase 6 | Pending |
+| SHDR-02 | Phase 6 | Complete |
+| SHDR-03 | Phase 6 | Complete |
 | ANIM-01 | Phase 7 | Pending |
 | ANIM-02 | Phase 7 | Pending |
 | ANIM-03 | Phase 7 | Pending |
@@ -124,7 +124,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | RUNT-01 | Phase 8 | Pending |
 | RUNT-02 | Phase 8 | Pending |
 | RUNT-03 | Phase 8 | Pending |
-| EXPT-01 | Phase 6 | Pending |
+| EXPT-01 | Phase 6 | Complete |
 | EXPT-02 | Phase 6 | Pending |
 | EXPT-03 | Phase 6 | Pending |
 | HTRL-01 | Phase 8 | Pending |
