@@ -85,11 +85,11 @@ Plans:
   1. AI can get a snapshot of the live scene tree from a running project showing node names, types, and hierarchy
   2. AI can inspect property values on a specific node and list all nodes in a specific group in the running scene tree
   3. AI can trigger a stop-then-run cycle after script changes and receive confirmation that the restarted project is running
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 08-01: TBD
-- [ ] 08-02: TBD
+- [ ] 08-01-PLAN.md -- GDScript runtime_helper.gd autoload + TypeScript inspection tools (inspect_scene_tree, inspect_node, inspect_group) + tests
+- [ ] 08-02-PLAN.md -- restart_project hot-reload tool + tests + index.ts registration
 
 ## Progress
 
@@ -105,4 +105,4 @@ Phases execute in numeric order: 5 -> 6 -> 7 -> 8
 | 5. Scene Composition | v2.0 | 0/2 | Planning complete | - |
 | 6. Project Configuration & Assets | v2.0 | 0/3 | Planning complete | - |
 | 7. Animation & TileMap | v2.0 | 0/3 | Planning complete | - |
-| 8. Runtime Inspection & Reload | v2.0 | 0/? | Not started | - |
+| 8. Runtime Inspection & Reload | v2.0 | 0/2 | Planning complete | - |
