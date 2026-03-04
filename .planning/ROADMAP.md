@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 1: Foundation** - SDK upgrade + architectural refactor + process hardening; zero tools visible in Claude Code until this ships
 - [ ] **Phase 2: Scene Intelligence** - Headless scene read/modify/inspect + GDScript parse error scanning; closes the biggest functional gap vs. competitors
 - [ ] **Phase 3: Project & Script Intelligence** - Project settings read/modify, resource files, script structure summary, MCP resources for @mention
-- [ ] **Phase 4: Diagnostics & Runtime** - GDScript LSP diagnostics, ClassDB introspection, screenshot capture for AI visual inspection
+- [x] **Phase 4: Diagnostics & Runtime** - GDScript LSP diagnostics, ClassDB introspection, screenshot capture for AI visual inspection
 
 ## Phase Details
 
@@ -80,9 +80,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 04-01-PLAN.md — TDD: LSP JSON-RPC message framing (encode/decode Content-Length protocol)
-- [ ] 04-02-PLAN.md — Screenshot capture: GDScript viewport autoload + capture_screenshot MCP tool
-- [ ] 04-03-PLAN.md — LSP client + get_diagnostics MCP tool with auto-spawn headless editor
+- [x] 04-01-PLAN.md — TDD: LSP JSON-RPC message framing (encode/decode Content-Length protocol)
+- [x] 04-02-PLAN.md — Screenshot capture: GDScript viewport autoload + capture_screenshot MCP tool
+- [x] 04-03-PLAN.md — LSP client + get_diagnostics MCP tool with auto-spawn headless editor
 
 ## Progress
 
@@ -94,4 +94,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. Foundation | 3/3 | Complete | 2026-03-03 |
 | 2. Scene Intelligence | 3/3 | Complete | 2026-03-03 |
 | 3. Project & Script Intelligence | 3/3 | Complete | 2026-03-04 |
-| 4. Diagnostics & Runtime | 0/3 | Not started | - |
+| 4. Diagnostics & Runtime | 3/3 | Complete | 2026-03-04 |
