@@ -1,5 +1,6 @@
 /**
- * Project tool domain: get_godot_version, list_projects, get_project_info
+ * Project tool domain: get_godot_version, list_projects, get_project_info,
+ * read_project_settings, modify_project_setting
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -7,8 +8,9 @@ import { z } from 'zod';
 import { join, basename } from 'path';
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { execGodot, validatePath } from '../godot.js';
+import { execGodot, executeOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
+import { parseProjectSettings } from '../parsers/project-parser.js';
 
 const DEBUG_MODE: boolean = process.env.DEBUG === 'true';
 
@@ -253,6 +255,143 @@ export function registerProjectTools(server: McpServer, ctx: ServerContext): voi
           'Ensure Godot is installed correctly',
           'Check if the GODOT_PATH environment variable is set correctly',
           'Verify the project path is accessible',
+        ]);
+      }
+    },
+  );
+
+  // Tool 8: read_project_settings
+  server.registerTool(
+    'read_project_settings',
+    {
+      title: 'Read Project Settings',
+      description:
+        'Read and parse project.godot settings as structured JSON. ' +
+        'Returns all sections (application, autoload, rendering, etc.) or a specific section.',
+      inputSchema: {
+        project_path: z.string().describe('Path to the Godot project directory'),
+        section: z
+          .string()
+          .optional()
+          .describe('Filter to a specific section (e.g. "autoload", "rendering")'),
+      },
+    },
+    async ({ project_path, section }) => {
+      if (!validatePath(project_path)) {
+        return toolError('Invalid project path', [
+          'Provide a valid path without ".." or other potentially unsafe characters',
+        ]);
+      }
+
+      try {
+        const projectFile = join(project_path, 'project.godot');
+        if (!existsSync(projectFile)) {
+          return toolError(`Not a valid Godot project: ${project_path}`, [
+            'Ensure the path points to a directory containing a project.godot file',
+            'Use list_projects to find valid Godot projects',
+          ]);
+        }
+
+        logDebug(`Reading project settings from: ${projectFile}`);
+        const content = readFileSync(projectFile, 'utf8');
+        const parsed = parseProjectSettings(content);
+
+        if (section) {
+          const sectionData = parsed.sections[section] || {};
+          return {
+            content: [
+              { type: 'text' as const, text: JSON.stringify(sectionData, null, 2) },
+            ],
+          };
+        }
+
+        return {
+          content: [
+            { type: 'text' as const, text: JSON.stringify(parsed, null, 2) },
+          ],
+        };
+      } catch (error: unknown) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
+        return toolError(`Failed to read project settings: ${errorMessage}`, [
+          'Verify the project path is accessible',
+          'Check that project.godot is a valid file',
+        ]);
+      }
+    },
+  );
+
+  // Tool 9: modify_project_setting
+  server.registerTool(
+    'modify_project_setting',
+    {
+      title: 'Modify Project Setting',
+      description:
+        'Set or delete a project.godot setting using Godot ConfigFile API. ' +
+        'Uses headless Godot for correct type handling.',
+      inputSchema: {
+        project_path: z.string().describe('Path to the Godot project directory'),
+        section: z.string().describe('Section name (e.g. "application", "autoload")'),
+        key: z.string().describe('Setting key (e.g. "config/name", "GameManager")'),
+        value: z
+          .string()
+          .optional()
+          .describe('Setting value (required for action "set")'),
+        action: z
+          .enum(['set', 'delete'])
+          .optional()
+          .default('set')
+          .describe('Action: "set" (default) or "delete"'),
+      },
+    },
+    async ({ project_path, section, key, value, action }) => {
+      if (!validatePath(project_path)) {
+        return toolError('Invalid project path', [
+          'Provide a valid path without ".." or other potentially unsafe characters',
+        ]);
+      }
+
+      try {
+        const projectFile = join(project_path, 'project.godot');
+        if (!existsSync(projectFile)) {
+          return toolError(`Not a valid Godot project: ${project_path}`, [
+            'Ensure the path points to a directory containing a project.godot file',
+            'Use list_projects to find valid Godot projects',
+          ]);
+        }
+
+        logDebug(`Modifying project setting: [${section}] ${key}`);
+
+        const { stdout } = await executeOperation(
+          ctx,
+          project_path,
+          'modify_project_setting',
+          { section, key, value, action },
+        );
+
+        // Parse JSON result from stdout (same pattern as validate_scripts)
+        const lines = stdout.split('\n');
+        const jsonLine = lines.find((l) => l.trim().startsWith('{'));
+        if (jsonLine) {
+          const result = JSON.parse(jsonLine.trim());
+          return {
+            content: [
+              { type: 'text' as const, text: JSON.stringify(result, null, 2) },
+            ],
+          };
+        }
+
+        return {
+          content: [
+            { type: 'text' as const, text: stdout.trim() || 'Setting modified successfully' },
+          ],
+        };
+      } catch (error: unknown) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
+        return toolError(`Failed to modify project setting: ${errorMessage}`, [
+          'Verify the project path is accessible',
+          'Check that Godot is installed and GODOT_PATH is set',
         ]);
       }
     },

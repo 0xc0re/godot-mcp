@@ -81,6 +81,8 @@ func _init():
             create_resource(params)
         "validate_scripts":
             validate_scripts(params)
+        "modify_project_setting":
+            modify_project_setting(params)
         _:
             log_error("Unknown operation: " + operation)
             quit(1)
@@ -1567,3 +1569,48 @@ func find_gd_files(base_path: String) -> Array:
         file_name = dir.get_next()
     dir.list_dir_end()
     return files
+
+# Modify a project.godot setting using ConfigFile API
+# Uses ConfigFile (NOT ProjectSettings.save()) to preserve all values including default-equal ones
+func modify_project_setting(params):
+    var section = params.get("section", "")
+    var key = params.get("key", "")
+    var value = params.get("value", "")
+    var action = params.get("action", "set")
+
+    if section == "":
+        log_error("Missing required parameter: section")
+        print(JSON.stringify({"success": false, "error": "Missing required parameter: section"}))
+        return
+
+    if key == "":
+        log_error("Missing required parameter: key")
+        print(JSON.stringify({"success": false, "error": "Missing required parameter: key"}))
+        return
+
+    var config = ConfigFile.new()
+    var err = config.load("res://project.godot")
+    if err != OK:
+        log_error("Failed to load project.godot: error code " + str(err))
+        print(JSON.stringify({"success": false, "error": "Failed to load project.godot: error code " + str(err)}))
+        return
+
+    if action == "delete":
+        config.erase_section_key(section, key)
+        log_info("Deleted key: [" + section + "] " + key)
+    else:
+        config.set_value(section, key, value)
+        log_info("Set key: [" + section + "] " + key + " = " + str(value))
+
+    err = config.save("res://project.godot")
+    if err != OK:
+        log_error("Failed to save project.godot: error code " + str(err))
+        print(JSON.stringify({"success": false, "error": "Failed to save project.godot: error code " + str(err)}))
+        return
+
+    print(JSON.stringify({
+        "success": true,
+        "section": section,
+        "key": key,
+        "action": action
+    }))
