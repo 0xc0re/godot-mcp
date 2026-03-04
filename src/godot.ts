@@ -157,18 +157,20 @@ export async function detectGodotPath(
 export async function execGodot(
   godotPath: string,
   args: string[],
+  options?: { timeout?: number },
 ): Promise<{ stdout: string; stderr: string }> {
+  const timeout = options?.timeout ?? EXEC_TIMEOUT;
   try {
     const { stdout, stderr } = await execFileAsync(godotPath, args, {
       maxBuffer: MAX_BUFFER,
-      timeout: EXEC_TIMEOUT,
+      timeout,
     });
     return { stdout: stdout ?? '', stderr: stderr ?? '' };
   } catch (error: unknown) {
     if (error instanceof Error && 'stdout' in error && 'stderr' in error) {
       const execError = error as Error & { stdout: string; stderr: string; killed?: boolean };
       if (execError.killed) {
-        throw new Error('Godot process timed out after 30 seconds');
+        throw new Error(`Godot process timed out after ${timeout / 1000} seconds`);
       }
       // Non-zero exit code still has output
       return { stdout: execError.stdout ?? '', stderr: execError.stderr ?? '' };
