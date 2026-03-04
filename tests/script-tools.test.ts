@@ -1,5 +1,5 @@
 /**
- * Tests for script MCP tools: validate_scripts.
+ * Tests for script MCP tools: validate_scripts, list_scripts, query_class.
  *
  * Uses vi.mock() to isolate tool logic from filesystem and Godot process.
  */
@@ -155,6 +155,146 @@ describe('Script MCP Tools', () => {
       const handler = handlers.get('validate_scripts')!;
       const result = await handler({
         project_path: '/not/a/project',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe('list_scripts', () => {
+    it('registers the list_scripts tool', () => {
+      expect(handlers.has('list_scripts')).toBe(true);
+    });
+
+    it('passes correct params to executeOperation with operation "list_scripts"', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation).mockResolvedValue({
+        stdout: '{"scripts":[],"total":0}',
+        stderr: '',
+      });
+
+      const handler = handlers.get('list_scripts')!;
+      await handler({
+        project_path: '/my/project',
+        path_filter: 'scripts/',
+      });
+
+      expect(executeOperation).toHaveBeenCalledWith(
+        ctx,
+        '/my/project',
+        'list_scripts',
+        expect.objectContaining({
+          pathFilter: 'scripts/',
+        }),
+      );
+    });
+
+    it('parses JSON result and returns structured script info', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation).mockResolvedValue({
+        stdout: '[INFO] Operation: list_scripts\n{"scripts":[{"path":"res://player.gd","class_name":"Player","methods":[{"name":"move","args":1}],"properties":[{"name":"speed","type":3}],"signals":[{"name":"died","args":0}]}],"total":1}',
+        stderr: '',
+      });
+
+      const handler = handlers.get('list_scripts')!;
+      const result = await handler({
+        project_path: '/my/project',
+      }) as { content: Array<{ type: string; text: string }> };
+
+      expect(result.content[0].text).toContain('1 script');
+      expect(result.content[0].text).toContain('res://player.gd');
+      expect(result.content[0].text).toContain('Player');
+      expect(result.content[0].text).toContain('1 method');
+      expect(result.content[0].text).toContain('1 property');
+      expect(result.content[0].text).toContain('1 signal');
+    });
+
+    it('returns toolError for invalid path', async () => {
+      vi.mocked(validatePath).mockReturnValue(false);
+
+      const handler = handlers.get('list_scripts')!;
+      const result = await handler({
+        project_path: '/bad/../path',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError for missing project.godot', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const handler = handlers.get('list_scripts')!;
+      const result = await handler({
+        project_path: '/not/a/project',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe('query_class', () => {
+    it('registers the query_class tool', () => {
+      expect(handlers.has('query_class')).toBe(true);
+    });
+
+    it('passes correct params to executeOperation with operation "query_class"', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation).mockResolvedValue({
+        stdout: '{"class_name":"Node2D","parent_class":"CanvasItem","properties":[],"methods":[],"signals":[]}',
+        stderr: '',
+      });
+
+      const handler = handlers.get('query_class')!;
+      await handler({
+        project_path: '/my/project',
+        class_name: 'Node2D',
+        no_inheritance: true,
+      });
+
+      expect(executeOperation).toHaveBeenCalledWith(
+        ctx,
+        '/my/project',
+        'query_class',
+        expect.objectContaining({
+          className: 'Node2D',
+          noInheritance: true,
+        }),
+      );
+    });
+
+    it('parses JSON result and returns class info', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation).mockResolvedValue({
+        stdout: '[INFO] Operation: query_class\n{"class_name":"Node2D","parent_class":"CanvasItem","properties":[{"name":"position","type":5,"usage":4102}],"methods":[{"name":"get_position","return_type":5,"args":[]}],"signals":[{"name":"visibility_changed","args":[]}]}',
+        stderr: '',
+      });
+
+      const handler = handlers.get('query_class')!;
+      const result = await handler({
+        project_path: '/my/project',
+        class_name: 'Node2D',
+      }) as { content: Array<{ type: string; text: string }> };
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.class_name).toBe('Node2D');
+      expect(parsed.parent_class).toBe('CanvasItem');
+      expect(parsed.properties).toHaveLength(1);
+      expect(parsed.methods).toHaveLength(1);
+      expect(parsed.signals).toHaveLength(1);
+    });
+
+    it('returns toolError for invalid path', async () => {
+      vi.mocked(validatePath).mockReturnValue(false);
+
+      const handler = handlers.get('query_class')!;
+      const result = await handler({
+        project_path: '/bad/../path',
+        class_name: 'Node2D',
       }) as { isError?: boolean };
 
       expect(result.isError).toBe(true);
