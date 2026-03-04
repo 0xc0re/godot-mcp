@@ -1,15 +1,24 @@
 /**
- * Editor tool domain: launch_editor, run_project, stop_project, get_debug_output
+ * Editor tool domain: launch_editor, run_project, stop_project, get_debug_output, capture_screenshot
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { join } from 'path';
-import { existsSync } from 'fs';
+import { existsSync, writeFileSync, readFileSync, unlinkSync, statSync } from 'fs';
 import { spawn } from 'child_process';
 import type { ServerContext } from '../types.js';
 import { validatePath, trackProcess } from '../godot.js';
 import { toolError } from '../errors.js';
+
+/** 800KB threshold for screenshot resize (conservative limit under Claude Desktop's 1MB) */
+const SCREENSHOT_SIZE_THRESHOLD = 800 * 1024;
+
+/** 5 second timeout waiting for screenshot file to appear */
+const SCREENSHOT_TIMEOUT_MS = 5000;
+
+/** 100ms polling interval for screenshot file */
+const SCREENSHOT_POLL_MS = 100;
 
 const DEBUG_MODE: boolean = process.env.DEBUG === 'true';
 
@@ -247,4 +256,159 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
       };
     },
   );
+
+  // Tool 5: capture_screenshot
+  server.registerTool(
+    'capture_screenshot',
+    {
+      title: 'Capture Screenshot',
+      description:
+        'Capture a screenshot of the running Godot game and return it as a base64-encoded PNG image. ' +
+        'The ScreenshotHelper autoload (src/scripts/screenshot_helper.gd) must be added to the ' +
+        'Godot project for this tool to work. It monitors a trigger file and captures the viewport on demand.',
+      inputSchema: {
+        project_path: z.string().describe('Path to the Godot project directory'),
+      },
+    },
+    async ({ project_path }) => {
+      if (!validatePath(project_path)) {
+        return toolError('Invalid project path', [
+          'Provide a valid path without ".." or other potentially unsafe characters',
+        ]);
+      }
+
+      if (!ctx.activeProcess) {
+        return toolError('No active Godot process. Cannot capture screenshot.', [
+          'Use run_project to start a Godot project first',
+          'Ensure the ScreenshotHelper autoload is added to the project',
+        ]);
+      }
+
+      const triggerPath = join(project_path, '.godot', 'screenshot_trigger');
+      const outputPath = join(project_path, '.godot', 'screenshot.png');
+
+      try {
+        // Write trigger file to signal the GDScript helper
+        logDebug(`Writing screenshot trigger: ${triggerPath}`);
+        writeFileSync(triggerPath, '');
+
+        // Poll for the output PNG file
+        const startTime = Date.now();
+        await new Promise<void>((resolve, reject) => {
+          const check = () => {
+            if (existsSync(outputPath)) {
+              resolve();
+              return;
+            }
+            if (Date.now() - startTime >= SCREENSHOT_TIMEOUT_MS) {
+              reject(new Error('timeout'));
+              return;
+            }
+            setTimeout(check, SCREENSHOT_POLL_MS);
+          };
+          setTimeout(check, SCREENSHOT_POLL_MS);
+        });
+
+        // Check file size and resize if needed
+        let fileSize = statSync(outputPath).size;
+        if (fileSize > SCREENSHOT_SIZE_THRESHOLD) {
+          logDebug(`Screenshot is ${fileSize} bytes, resizing to 960x540`);
+          await resizeScreenshot(ctx.godotPath, outputPath);
+          fileSize = statSync(outputPath).size;
+          logDebug(`Resized screenshot is ${fileSize} bytes`);
+        }
+
+        // Read and encode the screenshot
+        const pngData = readFileSync(outputPath);
+        const base64 = pngData.toString('base64');
+
+        // Cleanup
+        try {
+          unlinkSync(outputPath);
+        } catch {
+          // Ignore cleanup errors
+        }
+        try {
+          if (existsSync(triggerPath)) {
+            unlinkSync(triggerPath);
+          }
+        } catch {
+          // Ignore cleanup errors
+        }
+
+        return {
+          content: [
+            {
+              type: 'image' as const,
+              data: base64,
+              mimeType: 'image/png',
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        if (error instanceof Error && error.message === 'timeout') {
+          return toolError(
+            'Screenshot capture timed out. The screenshot file was not produced within 5 seconds.',
+            [
+              'Ensure the ScreenshotHelper autoload is added to the Godot project',
+              'Verify the game is running and rendering frames',
+              'Check that the .godot/ directory exists in the project',
+            ],
+          );
+        }
+
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        return toolError(`Failed to capture screenshot: ${errorMessage}`, [
+          'Ensure the game is running via run_project',
+          'Verify the ScreenshotHelper autoload is configured',
+        ]);
+      }
+    },
+  );
+}
+
+/**
+ * Resize a screenshot PNG to 960x540 using Godot headless.
+ * This keeps the image under Claude Desktop's 1MB content limit.
+ */
+function resizeScreenshot(godotPath: string, imagePath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const resizeScript = [
+      'extends SceneTree',
+      'func _init():',
+      `\tvar img = Image.load_from_file("${imagePath.replace(/\\/g, '/')}")`,
+      '\timg.resize(960, 540, Image.INTERPOLATE_BILINEAR)',
+      `\timg.save_png("${imagePath.replace(/\\/g, '/')}")`,
+      '\tquit()',
+    ].join('\n');
+
+    const tmpScriptPath = imagePath.replace(/\.png$/, '_resize.gd');
+    writeFileSync(tmpScriptPath, resizeScript);
+
+    const proc = spawn(godotPath, ['--headless', '--script', tmpScriptPath], {
+      stdio: 'pipe',
+    });
+
+    proc.on('close', (code: number | null) => {
+      try {
+        unlinkSync(tmpScriptPath);
+      } catch {
+        // Ignore cleanup errors
+      }
+      if (code === 0 || code === null) {
+        resolve();
+      } else {
+        reject(new Error(`Resize process exited with code ${code}`));
+      }
+    });
+
+    proc.on('error', (err: Error) => {
+      try {
+        unlinkSync(tmpScriptPath);
+      } catch {
+        // Ignore cleanup errors
+      }
+      reject(err);
+    });
+  });
 }
