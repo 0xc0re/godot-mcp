@@ -70,11 +70,12 @@ Plans:
   2. AI can add keyframes to an existing animation track and assign an AnimationLibrary to an AnimationPlayer node in a scene
   3. AI can create a TileSet resource with a TileSetAtlasSource referencing a texture and specifying tile size
   4. AI can paint individual cells, fill rectangular regions, and clear cells on a TileMapLayer node
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 07-01: TBD
-- [ ] 07-02: TBD
+- [ ] 07-01-PLAN.md -- GDScript backend operations for animation and tilemap domains
+- [ ] 07-02-PLAN.md -- Animation TypeScript tool handlers + tests
+- [ ] 07-03-PLAN.md -- TileMap TypeScript tool handlers + tests + index.ts wiring
 
 ### Phase 8: Runtime Inspection & Reload
 **Goal**: AI can observe a running game's live scene tree and node properties without stopping it, and trigger a restart cycle after making script changes
@@ -103,5 +104,5 @@ Phases execute in numeric order: 5 -> 6 -> 7 -> 8
 | 4. Diagnostics & Runtime | v1.0 | 3/3 | Complete | 2026-03-04 |
 | 5. Scene Composition | v2.0 | 0/2 | Planning complete | - |
 | 6. Project Configuration & Assets | v2.0 | 0/3 | Planning complete | - |
-| 7. Animation & TileMap | v2.0 | 0/? | Not started | - |
+| 7. Animation & TileMap | v2.0 | 0/3 | Planning complete | - |
 | 8. Runtime Inspection & Reload | v2.0 | 0/? | Not started | - |
