@@ -38,11 +38,11 @@
   3. AI can add a .tscn scene as an instanced child node in another scene, with the instance reference (not inlined nodes) visible in the saved .tscn
   4. AI can set properties on multiple nodes in a single tool call that completes in one Godot subprocess invocation
   5. AI can add and remove nodes from groups, and group membership persists in the saved .tscn file
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 05-01: TBD
-- [ ] 05-02: TBD
+- [ ] 05-01-PLAN.md -- Parser groups enhancement + GDScript operations backend
+- [ ] 05-02-PLAN.md -- TypeScript composition tool handlers + tests
 
 ### Phase 6: Project Configuration & Assets
 **Goal**: AI can scaffold complete game projects by configuring input bindings, creating shader files and materials, and exporting distributable builds
@@ -100,7 +100,7 @@ Phases execute in numeric order: 5 -> 6 -> 7 -> 8
 | 2. Scene Intelligence | v1.0 | 3/3 | Complete | 2026-03-03 |
 | 3. Project & Script Intelligence | v1.0 | 3/3 | Complete | 2026-03-04 |
 | 4. Diagnostics & Runtime | v1.0 | 3/3 | Complete | 2026-03-04 |
-| 5. Scene Composition | v2.0 | 0/? | Not started | - |
+| 5. Scene Composition | v2.0 | 0/2 | Planning complete | - |
 | 6. Project Configuration & Assets | v2.0 | 0/? | Not started | - |
 | 7. Animation & TileMap | v2.0 | 0/? | Not started | - |
 | 8. Runtime Inspection & Reload | v2.0 | 0/? | Not started | - |
