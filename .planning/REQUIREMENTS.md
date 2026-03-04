@@ -89,7 +89,7 @@ Explicitly excluded. Documented to prevent scope creep.
 | Free-form GDScript expression evaluation at runtime | Shell injection vector; can crash or corrupt live game state |
 | Full tilemap painting for large maps (100x100+) | Token budget explosion; 10,000 operations per map |
 | Arbitrary shader compilation checking | Requires GPU context; unavailable in headless mode |
-| True hot-reload without editor | Godot 4.x limitation — unreliable without editor running (issues #72825, #109677) |
+| True hot-reload without editor | Godot 4.x limitation -- unreliable without editor running (issues #72825, #109677) |
 | AnimationTree/StateMachine visual editing | Deeply complex nested resources; editor-only workflow |
 | C# script support | Different ecosystem; GDScript is the primary target |
 | Godot 3.x compatibility | APIs incompatible; Godot 4.x is current standard |
@@ -100,41 +100,41 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| COMP-01 | — | Pending |
-| COMP-02 | — | Pending |
-| COMP-03 | — | Pending |
-| COMP-04 | — | Pending |
-| COMP-05 | — | Pending |
-| COMP-06 | — | Pending |
-| CONF-01 | — | Pending |
-| CONF-02 | — | Pending |
-| CONF-03 | — | Pending |
-| CONF-04 | — | Pending |
-| SHDR-01 | — | Pending |
-| SHDR-02 | — | Pending |
-| SHDR-03 | — | Pending |
-| ANIM-01 | — | Pending |
-| ANIM-02 | — | Pending |
-| ANIM-03 | — | Pending |
-| ANIM-04 | — | Pending |
-| TILE-01 | — | Pending |
-| TILE-02 | — | Pending |
-| TILE-03 | — | Pending |
-| TILE-04 | — | Pending |
-| RUNT-01 | — | Pending |
-| RUNT-02 | — | Pending |
-| RUNT-03 | — | Pending |
-| EXPT-01 | — | Pending |
-| EXPT-02 | — | Pending |
-| EXPT-03 | — | Pending |
-| HTRL-01 | — | Pending |
-| HTRL-02 | — | Pending |
+| COMP-01 | Phase 5 | Pending |
+| COMP-02 | Phase 5 | Pending |
+| COMP-03 | Phase 5 | Pending |
+| COMP-04 | Phase 5 | Pending |
+| COMP-05 | Phase 5 | Pending |
+| COMP-06 | Phase 5 | Pending |
+| CONF-01 | Phase 6 | Pending |
+| CONF-02 | Phase 6 | Pending |
+| CONF-03 | Phase 6 | Pending |
+| CONF-04 | Phase 6 | Pending |
+| SHDR-01 | Phase 6 | Pending |
+| SHDR-02 | Phase 6 | Pending |
+| SHDR-03 | Phase 6 | Pending |
+| ANIM-01 | Phase 7 | Pending |
+| ANIM-02 | Phase 7 | Pending |
+| ANIM-03 | Phase 7 | Pending |
+| ANIM-04 | Phase 7 | Pending |
+| TILE-01 | Phase 7 | Pending |
+| TILE-02 | Phase 7 | Pending |
+| TILE-03 | Phase 7 | Pending |
+| TILE-04 | Phase 7 | Pending |
+| RUNT-01 | Phase 8 | Pending |
+| RUNT-02 | Phase 8 | Pending |
+| RUNT-03 | Phase 8 | Pending |
+| EXPT-01 | Phase 6 | Pending |
+| EXPT-02 | Phase 6 | Pending |
+| EXPT-03 | Phase 6 | Pending |
+| HTRL-01 | Phase 8 | Pending |
+| HTRL-02 | Phase 8 | Pending |
 
 **Coverage:**
 - v2.0 requirements: 29 total
-- Mapped to phases: 0
-- Unmapped: 29 ⚠️
+- Mapped to phases: 29
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-03*
-*Last updated: 2026-03-03 after initial definition*
+*Last updated: 2026-03-03 after roadmap creation*

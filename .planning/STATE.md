@@ -3,11 +3,11 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Enhancements
 status: active
-stopped_at: Defining requirements
+stopped_at: Roadmap created, ready to plan Phase 5
 last_updated: "2026-03-03"
-last_activity: 2026-03-03 — Milestone v2.0 started
+last_activity: 2026-03-03 -- Roadmap created for v2.0 Enhancements
 progress:
-  total_phases: 0
+  total_phases: 4
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -21,23 +21,25 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-03)
 
 **Core value:** An AI assistant connected via this server can perform any Godot development operation that a human developer would do
-**Current focus:** Milestone v2.0 Enhancements — defining requirements
+**Current focus:** Phase 5 -- Scene Composition
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-03-03 — Milestone v2.0 started
+Phase: 5 of 8 (Scene Composition)
+Plan: --
+Status: Ready to plan
+Last activity: 2026-03-03 -- Roadmap created for v2.0 Enhancements (4 phases, 29 requirements)
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 12
+- Total plans completed: 12 (v1.0)
 - Average duration: 3min
-- Total execution time: ~7 hours
+- Total execution time: ~7 hours (v1.0)
 
-**By Phase:**
+**By Phase (v1.0):**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
@@ -52,16 +54,22 @@ Last activity: 2026-03-03 — Milestone v2.0 started
 
 Decisions logged in PROJECT.md Key Decisions table.
 
+Recent:
+- v2.0: Runtime inspection uses file-polling IPC (not DAP TCP) due to Godot proprietary protocol + 4.5+ regression
+- v2.0: TileMap tools target TileMapLayer exclusively (TileMap deprecated in 4.3+)
+- v2.0: Hot-reload scoped to stop+run cycle (true hot-reload unreliable per Godot issues)
+
 ### Pending Todos
 
 None.
 
 ### Blockers/Concerns
 
-None.
+- Phase 7: Headless TileSet texture loading needs validation (may return null without display server)
+- Phase 8: Godot 4.5+ DAP regression may affect runtime inspection approach
 
 ## Session Continuity
 
 Last session: 2026-03-03
-Stopped at: Defining requirements for v2.0 Enhancements
+Stopped at: Roadmap created for v2.0 milestone
 Resume file: None
