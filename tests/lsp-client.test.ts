@@ -7,23 +7,35 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 
-// --- Mock net module ---
-const mockSocket = new EventEmitter() as EventEmitter & {
+// Create a fresh mock socket for each test
+let mockSocket: EventEmitter & {
   connect: ReturnType<typeof vi.fn>;
   write: ReturnType<typeof vi.fn>;
   destroy: ReturnType<typeof vi.fn>;
   end: ReturnType<typeof vi.fn>;
   destroyed: boolean;
 };
-mockSocket.connect = vi.fn();
-mockSocket.write = vi.fn();
-mockSocket.destroy = vi.fn();
-mockSocket.end = vi.fn();
-mockSocket.destroyed = false;
 
-vi.mock('net', () => ({
-  Socket: vi.fn(() => mockSocket),
-}));
+function createMockSocket() {
+  const s = new EventEmitter() as typeof mockSocket;
+  s.connect = vi.fn();
+  s.write = vi.fn();
+  s.destroy = vi.fn();
+  s.end = vi.fn();
+  s.destroyed = false;
+  return s;
+}
+
+vi.mock('net', () => {
+  // Return a class constructor so `new Socket()` works
+  return {
+    Socket: class MockSocket {
+      constructor() {
+        return mockSocket;
+      }
+    },
+  };
+});
 
 // --- Mock protocol module ---
 vi.mock('../src/lsp/protocol.js', () => ({
@@ -47,24 +59,45 @@ describe('LspClient', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
-    // Reset mock socket state
-    mockSocket.removeAllListeners();
-    mockSocket.connect = vi.fn();
-    mockSocket.write = vi.fn();
-    mockSocket.destroy = vi.fn();
-    mockSocket.end = vi.fn();
-    mockSocket.destroyed = false;
+    mockSocket = createMockSocket();
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
+  /** Helper: connect the client through the full initialize handshake */
+  async function connectClient(lspClient: LspClient): Promise<void> {
+    vi.mocked(parseMessages).mockImplementation((buffer: Buffer) => {
+      const str = buffer.toString();
+      if (str.includes('"result"')) {
+        return {
+          messages: [{
+            jsonrpc: '2.0' as const,
+            id: 1,
+            result: { capabilities: {} },
+          }],
+          remainder: Buffer.alloc(0),
+        };
+      }
+      return { messages: [], remainder: buffer };
+    });
+
+    const connectPromise = lspClient.connect(6014);
+    mockSocket.emit('connect');
+    await vi.advanceTimersByTimeAsync(0);
+
+    const responseBody = JSON.stringify({ jsonrpc: '2.0', id: 1, result: { capabilities: {} } });
+    const responseBuffer = Buffer.from(`Content-Length: ${Buffer.byteLength(responseBody)}\r\n\r\n${responseBody}`);
+    mockSocket.emit('data', responseBuffer);
+
+    await connectPromise;
+  }
+
   describe('connect', () => {
     it('sends initialize request with correct params after socket connects', async () => {
       client = new LspClient();
 
-      // Set up parseMessages to return the initialize response
       vi.mocked(parseMessages).mockImplementation((buffer: Buffer) => {
         const str = buffer.toString();
         if (str.includes('"result"')) {
@@ -84,8 +117,6 @@ describe('LspClient', () => {
 
       // Simulate socket connect
       mockSocket.emit('connect');
-
-      // Allow the initialize request to be sent
       await vi.advanceTimersByTimeAsync(0);
 
       // Verify encodeMessage was called with initialize request
@@ -138,36 +169,9 @@ describe('LspClient', () => {
   });
 
   describe('getDiagnostics', () => {
-    async function connectClient(): Promise<void> {
-      vi.mocked(parseMessages).mockImplementation((buffer: Buffer) => {
-        const str = buffer.toString();
-        if (str.includes('"result"')) {
-          return {
-            messages: [{
-              jsonrpc: '2.0' as const,
-              id: 1,
-              result: { capabilities: {} },
-            }],
-            remainder: Buffer.alloc(0),
-          };
-        }
-        return { messages: [], remainder: buffer };
-      });
-
-      const connectPromise = client.connect(6014);
-      mockSocket.emit('connect');
-      await vi.advanceTimersByTimeAsync(0);
-
-      const responseBody = JSON.stringify({ jsonrpc: '2.0', id: 1, result: { capabilities: {} } });
-      const responseBuffer = Buffer.from(`Content-Length: ${Buffer.byteLength(responseBody)}\r\n\r\n${responseBody}`);
-      mockSocket.emit('data', responseBuffer);
-
-      await connectPromise;
-    }
-
     it('sends didOpen and resolves when publishDiagnostics arrives', async () => {
       client = new LspClient();
-      await connectClient();
+      await connectClient(client);
 
       // Reset parseMessages for diagnostics flow
       vi.mocked(parseMessages).mockImplementation((buffer: Buffer) => {
@@ -245,7 +249,7 @@ describe('LspClient', () => {
 
     it('times out after 5s with empty array if no diagnostics received', async () => {
       client = new LspClient();
-      await connectClient();
+      await connectClient(client);
 
       // parseMessages returns nothing for any data
       vi.mocked(parseMessages).mockReturnValue({
@@ -264,7 +268,7 @@ describe('LspClient', () => {
 
     it('returns diagnostics with range, severity, message and source', async () => {
       client = new LspClient();
-      await connectClient();
+      await connectClient(client);
 
       vi.mocked(parseMessages).mockImplementation((buffer: Buffer) => {
         const str = buffer.toString();
@@ -323,16 +327,19 @@ describe('LspClient', () => {
   });
 
   describe('disconnect', () => {
-    it('destroys socket on disconnect', () => {
+    it('destroys socket on disconnect', async () => {
       client = new LspClient();
+      await connectClient(client);
 
-      // Access socket by connecting first (partial -- we just need a socket instance)
-      // Since the constructor creates no socket, we need to set it up
-      // The disconnect method should be safe to call even without connection
       client.disconnect();
 
-      // No error should be thrown
-      // When connected, it should destroy the socket
+      expect(mockSocket.destroy).toHaveBeenCalled();
+    });
+
+    it('is safe to call without connection', () => {
+      client = new LspClient();
+      // Should not throw
+      client.disconnect();
     });
   });
 });
