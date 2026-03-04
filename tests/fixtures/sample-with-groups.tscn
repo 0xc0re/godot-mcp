@@ -1,0 +1,18 @@
+[gd_scene load_steps=3 format=3 uid="uid://groups_test"]
+
+[ext_resource type="Script" uid="uid://script1" path="res://player.gd" id="1_abc"]
+[ext_resource type="PackedScene" uid="uid://enemy_scene" path="res://enemy.tscn" id="2_def"]
+
+[node name="Level" type="Node2D"]
+
+[node name="Player" type="CharacterBody2D" parent="." groups=["players", "persistent"]]
+script = ExtResource("1_abc")
+speed = 200.0
+
+[node name="Enemy1" type="CharacterBody2D" parent="." groups=["enemies"]]
+
+[node name="Crate" type="StaticBody2D" parent="." groups=["destructible", "interactable"]]
+
+[node name="EnemyInstance" parent="." instance=ExtResource("2_def")]
+
+[connection signal="body_entered" from="Player" to="." method="_on_body_entered"]

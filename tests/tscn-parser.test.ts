@@ -190,6 +190,92 @@ metadata/_custom = {
 });
 
 // ---------------------------------------------------------------------------
+// groups parsing
+// ---------------------------------------------------------------------------
+describe('groups parsing', () => {
+  it('parses groups=["enemies","destructible"] on a node into SceneNode.groups array', () => {
+    const content = readFileSync(join(FIXTURES, 'sample-with-groups.tscn'), 'utf-8');
+    const scene = parseScene(content);
+
+    // Player has groups=["players", "persistent"]
+    const player = scene.nodes.find(n => n.name === 'Player');
+    expect(player).toBeDefined();
+    expect(player!.groups).toEqual(['players', 'persistent']);
+
+    // Enemy1 has groups=["enemies"]
+    const enemy = scene.nodes.find(n => n.name === 'Enemy1');
+    expect(enemy).toBeDefined();
+    expect(enemy!.groups).toEqual(['enemies']);
+
+    // Crate has groups=["destructible", "interactable"]
+    const crate = scene.nodes.find(n => n.name === 'Crate');
+    expect(crate).toBeDefined();
+    expect(crate!.groups).toEqual(['destructible', 'interactable']);
+  });
+
+  it('parses groups=["single"] into single-element array', () => {
+    const content = `[gd_scene format=3]
+
+[node name="Root" type="Node2D"]
+
+[node name="Solo" type="Node2D" parent="." groups=["loners"]]
+`;
+    const scene = parseScene(content);
+    const solo = scene.nodes.find(n => n.name === 'Solo');
+    expect(solo).toBeDefined();
+    expect(solo!.groups).toEqual(['loners']);
+  });
+
+  it('returns undefined groups when node has no groups attribute', () => {
+    const content = readFileSync(join(FIXTURES, 'sample-with-groups.tscn'), 'utf-8');
+    const scene = parseScene(content);
+
+    // Level (root) has no groups
+    const level = scene.nodes.find(n => n.name === 'Level');
+    expect(level).toBeDefined();
+    expect(level!.groups).toBeUndefined();
+
+    // EnemyInstance has no groups
+    const enemyInstance = scene.nodes.find(n => n.name === 'EnemyInstance');
+    expect(enemyInstance).toBeDefined();
+    expect(enemyInstance!.groups).toBeUndefined();
+  });
+
+  it('parses both groups and instance attributes correctly', () => {
+    const content = `[gd_scene format=3]
+
+[node name="Root" type="Node2D"]
+
+[node name="InstancedEnemy" parent="." instance=ExtResource("2_def") groups=["enemies", "targets"]]
+`;
+    const scene = parseScene(content);
+    const node = scene.nodes.find(n => n.name === 'InstancedEnemy');
+    expect(node).toBeDefined();
+    expect(node!.instance).toBe('ExtResource("2_def")');
+    expect(node!.groups).toEqual(['enemies', 'targets']);
+  });
+
+  it('does not break existing sample.tscn parsing (regression)', () => {
+    const content = readFileSync(join(FIXTURES, 'sample.tscn'), 'utf-8');
+    const scene = parseScene(content);
+
+    // Verify structure hasn't changed
+    expect(scene.format).toBe(3);
+    expect(scene.uid).toBe('uid://cecaux1sm7mo0');
+    expect(scene.loadSteps).toBe(4);
+    expect(scene.extResources).toHaveLength(2);
+    expect(scene.subResources).toHaveLength(1);
+    expect(scene.nodes).toHaveLength(4);
+    expect(scene.connections).toHaveLength(1);
+
+    // No nodes in sample.tscn have groups, so all should be undefined
+    for (const node of scene.nodes) {
+      expect(node.groups).toBeUndefined();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // parseResource
 // ---------------------------------------------------------------------------
 describe('parseResource', () => {
