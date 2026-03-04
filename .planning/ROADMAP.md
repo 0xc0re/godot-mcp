@@ -77,7 +77,12 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. User can request GDScript diagnostics for a file and receive type errors and undefined variable warnings from Godot's LSP
   2. User can capture a screenshot of the running game and the image is available for AI visual inspection
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 04-01-PLAN.md — TDD: LSP JSON-RPC message framing (encode/decode Content-Length protocol)
+- [ ] 04-02-PLAN.md — Screenshot capture: GDScript viewport autoload + capture_screenshot MCP tool
+- [ ] 04-03-PLAN.md — LSP client + get_diagnostics MCP tool with auto-spawn headless editor
 
 ## Progress
 
@@ -88,5 +93,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Foundation | 3/3 | Complete | 2026-03-03 |
 | 2. Scene Intelligence | 3/3 | Complete | 2026-03-03 |
-| 3. Project & Script Intelligence | 0/3 | Not started | - |
-| 4. Diagnostics & Runtime | 0/TBD | Not started | - |
+| 3. Project & Script Intelligence | 3/3 | Complete | 2026-03-04 |
+| 4. Diagnostics & Runtime | 0/3 | Not started | - |
