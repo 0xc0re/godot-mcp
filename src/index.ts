@@ -14,6 +14,7 @@ import { registerResourceTools } from './tools/resource.js';
 import { registerSceneTools } from './tools/scene.js';
 import { registerScriptTools } from './tools/script.js';
 import { registerUidTools } from './tools/uid.js';
+import { registerDiagnosticsTools } from './tools/diagnostics.js';
 import { registerGodotResources } from './resources/godot-resources.js';
 
 const server = new McpServer(
@@ -33,6 +34,7 @@ registerResourceTools(server, ctx);
 registerSceneTools(server, ctx);
 registerScriptTools(server, ctx);
 registerUidTools(server, ctx);
+registerDiagnosticsTools(server, ctx);
 
 // Register MCP resources for @mention context
 registerGodotResources(server, ctx);
@@ -50,6 +52,15 @@ const shutdown = async () => {
     }
   }
   ctx.trackedProcesses.clear();
+  // Clean up LSP client and headless editor process
+  if (ctx.lspClient) {
+    ctx.lspClient.disconnect();
+    ctx.lspClient = undefined;
+  }
+  if (ctx.lspProcess && !ctx.lspProcess.killed) {
+    ctx.lspProcess.kill('SIGTERM');
+    ctx.lspProcess = undefined;
+  }
   await server.close();
   process.exit(0);
 };
