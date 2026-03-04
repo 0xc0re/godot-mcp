@@ -46,7 +46,8 @@ vi.mock('../src/errors.js', () => ({
 }));
 
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
-import { validatePath } from '../src/godot.js';
+import { spawn } from 'child_process';
+import { validatePath, trackProcess } from '../src/godot.js';
 import { toolError } from '../src/errors.js';
 
 // Helper to extract registered tool handlers from McpServer
@@ -436,5 +437,217 @@ describe('inspect_group', () => {
     })) as { isError?: boolean };
 
     expect(result.isError).toBe(true);
+  });
+});
+
+describe('restart_project', () => {
+  let server: McpServer;
+  let ctx: ServerContext;
+  let handlers: Map<string, (params: Record<string, unknown>) => Promise<unknown>>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    server = new McpServer(
+      { name: 'test', version: '0.0.1' },
+      { capabilities: { tools: {} } },
+    );
+    ctx = createTestContext();
+    handlers = getToolHandlers(server);
+    registerRuntimeTools(server, ctx);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('registers the restart_project tool', () => {
+    expect(handlers.has('restart_project')).toBe(true);
+  });
+
+  it('returns error when no active process', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    ctx.activeProcess = null;
+
+    const handler = handlers.get('restart_project')!;
+    const result = (await handler({ project_path: '/my/project' })) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining('No active Godot process to restart'),
+      expect.any(Array),
+    );
+  });
+
+  it('returns error for invalid project path', async () => {
+    vi.mocked(validatePath).mockReturnValue(false);
+
+    const handler = handlers.get('restart_project')!;
+    const result = (await handler({ project_path: '/bad/../path' })) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+  });
+
+  it('kills existing process and spawns new one', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+
+    // Set up old mock process that exits immediately when killed
+    const oldProcess = createMockProcess();
+    vi.mocked(oldProcess.once).mockImplementation(((event: string, cb: () => void) => {
+      if (event === 'exit') {
+        // Fire exit callback immediately
+        setTimeout(() => cb(), 0);
+      }
+      return oldProcess;
+    }) as typeof oldProcess.once);
+    ctx.activeProcess = { process: oldProcess, output: ['old output'], errors: [] };
+
+    // Set up new mock process returned by spawn
+    const newProcess = {
+      pid: 5678,
+      killed: false,
+      stdout: {
+        on: vi.fn(),
+        once: vi.fn((event: string, cb: (data: Buffer) => void) => {
+          if (event === 'data') {
+            // Fire data callback immediately to confirm running
+            setTimeout(() => cb(Buffer.from('Godot Engine v4.3')), 0);
+          }
+          return newProcess.stdout;
+        }),
+      },
+      stderr: { on: vi.fn() },
+      on: vi.fn(),
+      once: vi.fn((_event: string, _cb: () => void) => newProcess),
+    } as unknown as ChildProcess;
+
+    vi.mocked(spawn).mockReturnValue(newProcess);
+
+    const handler = handlers.get('restart_project')!;
+    const resultPromise = handler({ project_path: '/my/project' });
+
+    // Advance timers to allow exit callback and stdout data to fire
+    await vi.advanceTimersByTimeAsync(100);
+
+    const result = (await resultPromise) as {
+      content: Array<{ type: string; text?: string }>;
+    };
+
+    // Verify old process was killed
+    expect(oldProcess.kill).toHaveBeenCalled();
+
+    // Verify spawn was called with correct args
+    expect(spawn).toHaveBeenCalledWith(
+      '/usr/bin/godot',
+      ['-d', '--path', '/my/project'],
+      { stdio: 'pipe' },
+    );
+
+    // Verify ctx.activeProcess was updated to new process
+    expect(ctx.activeProcess).not.toBeNull();
+    expect(ctx.activeProcess!.process).toBe(newProcess);
+
+    // Verify result contains PID and running status
+    expect(result.content).toHaveLength(1);
+    const parsed = JSON.parse(result.content[0].text!);
+    expect(parsed.pid).toBe(5678);
+    expect(parsed.running).toBe(true);
+  });
+
+  it('includes scene parameter when provided', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+
+    // Old process
+    const oldProcess = createMockProcess();
+    vi.mocked(oldProcess.once).mockImplementation(((event: string, cb: () => void) => {
+      if (event === 'exit') {
+        setTimeout(() => cb(), 0);
+      }
+      return oldProcess;
+    }) as typeof oldProcess.once);
+    ctx.activeProcess = { process: oldProcess, output: [], errors: [] };
+
+    // New process
+    const newProcess = {
+      pid: 9999,
+      killed: false,
+      stdout: {
+        on: vi.fn(),
+        once: vi.fn((event: string, cb: (data: Buffer) => void) => {
+          if (event === 'data') {
+            setTimeout(() => cb(Buffer.from('Godot Engine v4.3')), 0);
+          }
+          return newProcess.stdout;
+        }),
+      },
+      stderr: { on: vi.fn() },
+      on: vi.fn(),
+      once: vi.fn((_event: string, _cb: () => void) => newProcess),
+    } as unknown as ChildProcess;
+
+    vi.mocked(spawn).mockReturnValue(newProcess);
+
+    const handler = handlers.get('restart_project')!;
+    const resultPromise = handler({
+      project_path: '/my/project',
+      scene: '/path/to/scene.tscn',
+    });
+
+    await vi.advanceTimersByTimeAsync(100);
+    await resultPromise;
+
+    // Verify spawn args include scene
+    expect(spawn).toHaveBeenCalledWith(
+      '/usr/bin/godot',
+      ['-d', '--path', '/my/project', '/path/to/scene.tscn'],
+      { stdio: 'pipe' },
+    );
+  });
+
+  it('confirms running by waiting for stdout output', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+
+    // Old process
+    const oldProcess = createMockProcess();
+    vi.mocked(oldProcess.once).mockImplementation(((event: string, cb: () => void) => {
+      if (event === 'exit') {
+        setTimeout(() => cb(), 0);
+      }
+      return oldProcess;
+    }) as typeof oldProcess.once);
+    ctx.activeProcess = { process: oldProcess, output: [], errors: [] };
+
+    // New process - stdout fires data event, confirming it's running
+    const newProcess = {
+      pid: 7777,
+      killed: false,
+      stdout: {
+        on: vi.fn(),
+        once: vi.fn((event: string, cb: (data: Buffer) => void) => {
+          if (event === 'data') {
+            setTimeout(() => cb(Buffer.from('Engine initialized')), 10);
+          }
+          return newProcess.stdout;
+        }),
+      },
+      stderr: { on: vi.fn() },
+      on: vi.fn(),
+      once: vi.fn((_event: string, _cb: () => void) => newProcess),
+    } as unknown as ChildProcess;
+
+    vi.mocked(spawn).mockReturnValue(newProcess);
+
+    const handler = handlers.get('restart_project')!;
+    const resultPromise = handler({ project_path: '/my/project' });
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    const result = (await resultPromise) as {
+      content: Array<{ type: string; text?: string }>;
+    };
+
+    const parsed = JSON.parse(result.content[0].text!);
+    expect(parsed.running).toBe(true);
+    expect(parsed.message).toContain('restarted');
   });
 });
