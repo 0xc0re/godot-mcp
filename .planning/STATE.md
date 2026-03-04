@@ -4,7 +4,7 @@ milestone: v0.1
 milestone_name: milestone
 status: completed
 stopped_at: Completed 03-03-PLAN.md (MCP resource registration)
-last_updated: "2026-03-04T00:50:00Z"
+last_updated: "2026-03-04T00:50:43.891Z"
 last_activity: 2026-03-04 — Completed 03-03-PLAN.md (MCP resource registration)
 progress:
   total_phases: 4
@@ -35,9 +35,9 @@ Progress: [##########] 100%
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7
-- Average duration: 4min
-- Total execution time: 0.48 hours
+- Total plans completed: 9
+- Average duration: 3min
+- Total execution time: 0.55 hours
 
 **By Phase:**
 
@@ -45,14 +45,14 @@ Progress: [##########] 100%
 |-------|-------|-------|----------|
 | 01-foundation | 3 | 14min | 5min |
 | 02-scene-intelligence | 3 | 11min | 4min |
-| 03-project-script-intelligence | 1 | 4min | 4min |
+| 03-project-script-intelligence | 3 | 9min | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 01-03 (4min), 02-01 (4min), 02-02 (4min), 02-03 (3min), 03-01 (4min)
-- Trend: stable
+- Last 5 plans: 02-02 (4min), 02-03 (3min), 03-01 (4min), 03-02 (3min), 03-03 (2min)
+- Trend: stable/improving
 
 *Updated after each plan completion*
-| Phase 03 P02 | 3min | 1 tasks | 3 files |
+| Phase 03 P03 | 2min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -88,6 +88,10 @@ Recent decisions affecting current work:
 - [Phase 03-02]: list_scripts filters methods starting with _ (private/virtual) and properties by PROPERTY_USAGE_SCRIPT_VARIABLE
 - [Phase 03-02]: query_class returns raw JSON for maximum AI flexibility rather than formatted text
 - [Phase 03-02]: Both list_scripts and query_class reuse find_gd_files helper and JSON-from-mixed-output parsing pattern
+- [03-03]: Used GODOT_PROJECT_PATH env var with cwd fallback for resource project path resolution
+- [03-03]: URI-encode path segments to handle spaces and special characters in resource URIs
+- [03-03]: Graceful degradation to empty resource list when no valid Godot project found
+- [Phase 03-03]: Used GODOT_PROJECT_PATH env var with cwd fallback for resource project path resolution
 
 ### Pending Todos
 
@@ -101,6 +105,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-04T00:49:59.070Z
-Stopped at: Completed 03-02-PLAN.md (script introspection and ClassDB query)
+Last session: 2026-03-04T00:50:40.316Z
+Stopped at: Completed 03-03-PLAN.md (MCP resource registration)
 Resume file: None
