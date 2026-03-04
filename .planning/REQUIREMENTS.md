@@ -45,9 +45,9 @@ Requirements for v2.0 Enhancements milestone. Each maps to roadmap phases.
 
 ### Runtime Inspection
 
-- [ ] **RUNT-01**: AI can get a snapshot of the live scene tree from a running project (node names, types, hierarchy)
-- [ ] **RUNT-02**: AI can inspect property values on a specific node in the running scene tree
-- [ ] **RUNT-03**: AI can list all nodes in a specific group in the running scene tree
+- [x] **RUNT-01**: AI can get a snapshot of the live scene tree from a running project (node names, types, hierarchy)
+- [x] **RUNT-02**: AI can inspect property values on a specific node in the running scene tree
+- [x] **RUNT-03**: AI can list all nodes in a specific group in the running scene tree
 
 ### Export
 
@@ -121,9 +121,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TILE-02 | Phase 7 | Complete |
 | TILE-03 | Phase 7 | Complete |
 | TILE-04 | Phase 7 | Complete |
-| RUNT-01 | Phase 8 | Pending |
-| RUNT-02 | Phase 8 | Pending |
-| RUNT-03 | Phase 8 | Pending |
+| RUNT-01 | Phase 8 | Complete |
+| RUNT-02 | Phase 8 | Complete |
+| RUNT-03 | Phase 8 | Complete |
 | EXPT-01 | Phase 6 | Complete |
 | EXPT-02 | Phase 6 | Complete |
 | EXPT-03 | Phase 6 | Complete |
