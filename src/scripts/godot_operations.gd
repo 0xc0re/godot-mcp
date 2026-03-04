@@ -87,6 +87,16 @@ func _init():
             list_scripts(params)
         "query_class":
             query_class(params)
+        "connect_signal":
+            connect_signal(params)
+        "disconnect_signal":
+            disconnect_signal(params)
+        "instance_scene":
+            instance_scene(params)
+        "batch_set_properties":
+            batch_set_properties(params)
+        "manage_groups":
+            manage_groups(params)
         _:
             log_error("Unknown operation: " + operation)
             quit(1)
@@ -103,6 +113,20 @@ func log_info(message):
 
 func log_error(message):
     printerr("[ERROR] " + message)
+
+## Resolve a node path relative to the scene root.
+## Handles "root", "root/Path/To/Node", and plain relative paths.
+func find_node_by_path(scene_root: Node, node_path: String) -> Node:
+    if node_path == "root" or node_path == "":
+        return scene_root
+    var target = scene_root
+    if node_path.begins_with("root/"):
+        var relative_path = node_path.substr(5)
+        if relative_path != "":
+            target = scene_root.get_node_or_null(relative_path)
+    else:
+        target = scene_root.get_node_or_null(node_path)
+    return target
 
 # Get a script by name or path
 func get_script_by_name(name_of_class):
@@ -1259,14 +1283,7 @@ func modify_node_property(params):
     if debug_mode:
         print("Original node path: " + node_path)
 
-    var target = scene_root
-    if node_path.begins_with("root/"):
-        var relative_path = node_path.substr(5)  # Remove "root/" prefix
-        if relative_path != "":
-            target = scene_root.get_node(relative_path)
-        # else target stays as scene_root
-    elif node_path != "root" and node_path != "":
-        target = scene_root.get_node(node_path)
+    var target = find_node_by_path(scene_root, node_path)
 
     if not target:
         log_error("Node not found: " + params.node_path)
@@ -1341,16 +1358,11 @@ func remove_node(params):
     if node_path == "root" or node_path == "":
         log_error("Cannot remove the root node")
         quit(1)
+    if node_path.begins_with("root/") and node_path.substr(5) == "":
+        log_error("Cannot remove the root node")
+        quit(1)
 
-    var target = scene_root
-    if node_path.begins_with("root/"):
-        var relative_path = node_path.substr(5)  # Remove "root/" prefix
-        if relative_path == "":
-            log_error("Cannot remove the root node")
-            quit(1)
-        target = scene_root.get_node(relative_path)
-    else:
-        target = scene_root.get_node(node_path)
+    var target = find_node_by_path(scene_root, node_path)
 
     if not target:
         log_error("Node not found: " + params.node_path)
@@ -1416,13 +1428,7 @@ func attach_script(params):
     if debug_mode:
         print("Original node path: " + node_path)
 
-    var target = scene_root
-    if node_path.begins_with("root/"):
-        var relative_path = node_path.substr(5)  # Remove "root/" prefix
-        if relative_path != "":
-            target = scene_root.get_node(relative_path)
-    elif node_path != "root" and node_path != "":
-        target = scene_root.get_node(node_path)
+    var target = find_node_by_path(scene_root, node_path)
 
     if not target:
         log_error("Node not found: " + params.node_path)
@@ -1750,4 +1756,262 @@ func query_class(params):
         "properties": properties,
         "methods": methods,
         "signals": signals
+    }))
+
+# Connect a signal between two nodes in a scene
+func connect_signal(params):
+    log_info("Connecting signal in scene: " + params.scene_path)
+
+    var full_scene_path = ensure_res_prefix(params.scene_path)
+
+    # Load the scene
+    var scene = load(full_scene_path)
+    if not scene:
+        log_error("Failed to load scene: " + full_scene_path)
+        quit(1)
+
+    var scene_root = scene.instantiate()
+
+    # Find source and target nodes
+    var source = find_node_by_path(scene_root, params.source_node_path)
+    if not source:
+        log_error("Source node not found: " + params.source_node_path)
+        quit(1)
+
+    var target = find_node_by_path(scene_root, params.target_node_path)
+    if not target:
+        log_error("Target node not found: " + params.target_node_path)
+        quit(1)
+
+    # Verify signal exists on source node
+    if not source.has_signal(params.signal_name):
+        var available_signals = []
+        for sig in source.get_signal_list():
+            available_signals.append(sig["name"])
+        log_error("Signal '" + params.signal_name + "' does not exist on node. Available signals: " + str(available_signals))
+        quit(1)
+
+    # Connect with CONNECT_PERSIST flag (value 2) for .tscn serialization
+    source[params.signal_name].connect(Callable(target, params.method_name), CONNECT_PERSIST)
+
+    # Pack and save
+    var packed_scene = PackedScene.new()
+    var result = packed_scene.pack(scene_root)
+    if result != OK:
+        log_error("Failed to pack scene after connecting signal: " + str(result))
+        quit(1)
+
+    var save_error = ResourceSaver.save(packed_scene, full_scene_path)
+    if save_error != OK:
+        log_error("Failed to save scene: " + str(save_error))
+        quit(1)
+
+    print(JSON.stringify({
+        "success": true,
+        "signal": params.signal_name,
+        "from": params.source_node_path,
+        "to": params.target_node_path,
+        "method": params.method_name
+    }))
+
+# Disconnect a signal between two nodes in a scene
+func disconnect_signal(params):
+    log_info("Disconnecting signal in scene: " + params.scene_path)
+
+    var full_scene_path = ensure_res_prefix(params.scene_path)
+
+    # Load the scene
+    var scene = load(full_scene_path)
+    if not scene:
+        log_error("Failed to load scene: " + full_scene_path)
+        quit(1)
+
+    var scene_root = scene.instantiate()
+
+    # Find source and target nodes
+    var source = find_node_by_path(scene_root, params.source_node_path)
+    if not source:
+        log_error("Source node not found: " + params.source_node_path)
+        quit(1)
+
+    var target = find_node_by_path(scene_root, params.target_node_path)
+    if not target:
+        log_error("Target node not found: " + params.target_node_path)
+        quit(1)
+
+    # Check connection exists
+    if not source.is_connected(params.signal_name, Callable(target, params.method_name)):
+        log_error("Signal not connected: " + params.signal_name + " from " + params.source_node_path + " to " + params.target_node_path + "::" + params.method_name)
+        quit(1)
+
+    # Disconnect the signal
+    source.disconnect(params.signal_name, Callable(target, params.method_name))
+
+    # Pack and save
+    var packed_scene = PackedScene.new()
+    var result = packed_scene.pack(scene_root)
+    if result != OK:
+        log_error("Failed to pack scene after disconnecting signal: " + str(result))
+        quit(1)
+
+    var save_error = ResourceSaver.save(packed_scene, full_scene_path)
+    if save_error != OK:
+        log_error("Failed to save scene: " + str(save_error))
+        quit(1)
+
+    print(JSON.stringify({
+        "success": true,
+        "disconnected": params.signal_name
+    }))
+
+# Instance a child scene under a parent node in a scene
+func instance_scene(params):
+    log_info("Instancing scene in: " + params.scene_path)
+
+    var full_scene_path = ensure_res_prefix(params.scene_path)
+
+    # Load the parent scene
+    var scene = load(full_scene_path)
+    if not scene:
+        log_error("Failed to load scene: " + full_scene_path)
+        quit(1)
+
+    var scene_root = scene.instantiate()
+
+    # Find parent node
+    var parent = find_node_by_path(scene_root, params.parent_node_path)
+    if not parent:
+        log_error("Parent node not found: " + params.parent_node_path)
+        quit(1)
+
+    # Load child scene
+    var child_packed = load(ensure_res_prefix(params.child_scene_path)) as PackedScene
+    if not child_packed:
+        log_error("Failed to load child scene: " + params.child_scene_path)
+        quit(1)
+
+    var child_instance = child_packed.instantiate()
+
+    # Optionally rename the child instance
+    if params.has("node_name") and not params.node_name.is_empty():
+        child_instance.name = params.node_name
+
+    # Add child to parent
+    parent.add_child(child_instance)
+
+    # CRITICAL: Set owner to scene root (NOT parent) for correct pack() behavior
+    child_instance.owner = scene_root
+
+    # Pack and save
+    var packed_scene = PackedScene.new()
+    var result = packed_scene.pack(scene_root)
+    if result != OK:
+        log_error("Failed to pack scene after instancing: " + str(result))
+        quit(1)
+
+    var save_error = ResourceSaver.save(packed_scene, full_scene_path)
+    if save_error != OK:
+        log_error("Failed to save scene: " + str(save_error))
+        quit(1)
+
+    print(JSON.stringify({
+        "success": true,
+        "instanced": params.child_scene_path,
+        "parent": params.parent_node_path,
+        "name": child_instance.name
+    }))
+
+# Batch set properties on multiple nodes in a single scene save
+func batch_set_properties(params):
+    log_info("Batch setting properties in scene: " + params.scene_path)
+
+    var full_scene_path = ensure_res_prefix(params.scene_path)
+
+    # Load the scene
+    var scene = load(full_scene_path)
+    if not scene:
+        log_error("Failed to load scene: " + full_scene_path)
+        quit(1)
+
+    var scene_root = scene.instantiate()
+
+    var operations = params.operations
+
+    # Validation pass first (fail-fast): check ALL node paths before applying any changes
+    for op in operations:
+        var target = find_node_by_path(scene_root, op.node_path)
+        if not target:
+            log_error("Node not found during validation: " + op.node_path)
+            quit(1)
+
+    # Apply pass: set properties on each node
+    for op in operations:
+        var target = find_node_by_path(scene_root, op.node_path)
+        var type_hint = op.value_type if op.has("value_type") else ""
+        var converted_value = convert_json_to_godot_type(op.value, type_hint)
+        target.set(op.property_name, converted_value)
+
+    # Single pack and save at the end
+    var packed_scene = PackedScene.new()
+    var result = packed_scene.pack(scene_root)
+    if result != OK:
+        log_error("Failed to pack scene after batch property set: " + str(result))
+        quit(1)
+
+    var save_error = ResourceSaver.save(packed_scene, full_scene_path)
+    if save_error != OK:
+        log_error("Failed to save scene: " + str(save_error))
+        quit(1)
+
+    print(JSON.stringify({
+        "success": true,
+        "operations_applied": operations.size()
+    }))
+
+# Manage group membership on a node in a scene
+func manage_groups(params):
+    log_info("Managing groups in scene: " + params.scene_path)
+
+    var full_scene_path = ensure_res_prefix(params.scene_path)
+
+    # Load the scene
+    var scene = load(full_scene_path)
+    if not scene:
+        log_error("Failed to load scene: " + full_scene_path)
+        quit(1)
+
+    var scene_root = scene.instantiate()
+
+    # Find target node
+    var target = find_node_by_path(scene_root, params.node_path)
+    if not target:
+        log_error("Node not found: " + params.node_path)
+        quit(1)
+
+    # Add groups (persistent = true for pack/save survival)
+    if params.has("add_groups"):
+        for group_name in params.add_groups:
+            target.add_to_group(group_name, true)
+
+    # Remove groups (no error if not in group)
+    if params.has("remove_groups"):
+        for group_name in params.remove_groups:
+            target.remove_from_group(group_name)
+
+    # Pack and save
+    var packed_scene = PackedScene.new()
+    var result = packed_scene.pack(scene_root)
+    if result != OK:
+        log_error("Failed to pack scene after group management: " + str(result))
+        quit(1)
+
+    var save_error = ResourceSaver.save(packed_scene, full_scene_path)
+    if save_error != OK:
+        log_error("Failed to save scene: " + str(save_error))
+        quit(1)
+
+    print(JSON.stringify({
+        "success": true,
+        "node": params.node_path,
+        "groups": target.get_groups()
     }))
