@@ -52,8 +52,8 @@ Requirements for v2.0 Enhancements milestone. Each maps to roadmap phases.
 ### Export
 
 - [x] **EXPT-01**: AI can export a project headlessly for a named preset (Web, Linux, Windows, macOS)
-- [ ] **EXPT-02**: AI can validate export prerequisites before attempting (presets exist, templates installed)
-- [ ] **EXPT-03**: AI can list available export presets from export_presets.cfg
+- [x] **EXPT-02**: AI can validate export prerequisites before attempting (presets exist, templates installed)
+- [x] **EXPT-03**: AI can list available export presets from export_presets.cfg
 
 ### Hot-Reload
 
@@ -125,8 +125,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | RUNT-02 | Phase 8 | Pending |
 | RUNT-03 | Phase 8 | Pending |
 | EXPT-01 | Phase 6 | Complete |
-| EXPT-02 | Phase 6 | Pending |
-| EXPT-03 | Phase 6 | Pending |
+| EXPT-02 | Phase 6 | Complete |
+| EXPT-03 | Phase 6 | Complete |
 | HTRL-01 | Phase 8 | Pending |
 | HTRL-02 | Phase 8 | Pending |
 
