@@ -1726,7 +1726,7 @@ func query_class(params):
             })
         methods.append({
             "name": method["name"],
-            "return_type": method["return_val"]["type"],
+            "return_type": method["return"]["type"],
             "args": args
         })
 
