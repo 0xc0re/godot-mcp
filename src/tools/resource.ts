@@ -1,8 +1,9 @@
 /**
- * Resource tool domain: read_resource, create_resource
+ * Resource tool domain: read_resource, create_resource, modify_resource
  *
  * read_resource uses the TypeScript parser for fast, zero-latency reads.
  * create_resource delegates to Godot headless for correct type serialization.
+ * modify_resource loads an existing .tres, sets properties, and saves it back.
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -166,6 +167,101 @@ export function registerResourceTools(server: McpServer, ctx: ServerContext): vo
         const errorMessage =
           error instanceof Error ? error.message : 'Unknown error';
         return toolError(`Failed to create resource: ${errorMessage}`, [
+          'Ensure Godot is installed correctly',
+          'Check if the GODOT_PATH environment variable is set correctly',
+          'Verify the project path is accessible',
+        ]);
+      }
+    },
+  );
+
+  // modify_resource tool
+  server.registerTool(
+    'modify_resource',
+    {
+      title: 'Modify Resource',
+      description:
+        'Modify properties on an existing Godot resource file (.tres). Loads the resource, sets specified properties, and saves it back.',
+      inputSchema: {
+        project_path: z.string().describe('Path to the Godot project directory'),
+        resource_path: z
+          .string()
+          .describe(
+            'Path to the resource file relative to project (e.g. "materials/ground.tres")',
+          ),
+        properties: z
+          .record(z.any())
+          .describe(
+            'Properties to set on the resource (e.g. {"albedo_color": {"r": 1, "g": 0, "b": 0}})',
+          ),
+        property_types: z
+          .record(z.string())
+          .optional()
+          .describe(
+            'Type hints for complex property values (e.g. {"albedo_color": "Color"})',
+          ),
+      },
+    },
+    async ({ project_path, resource_path, properties, property_types }) => {
+      if (!validatePath(project_path) || !validatePath(resource_path)) {
+        return toolError('Invalid path', [
+          'Provide valid paths without ".." or other potentially unsafe characters',
+        ]);
+      }
+
+      try {
+        const projectFile = join(project_path, 'project.godot');
+        if (!existsSync(projectFile)) {
+          return toolError(`Not a valid Godot project: ${project_path}`, [
+            'Ensure the path points to a directory containing a project.godot file',
+            'Use list_projects to find valid Godot projects',
+          ]);
+        }
+
+        const resourceFilePath = join(project_path, resource_path);
+        if (!existsSync(resourceFilePath)) {
+          return toolError(`Resource file does not exist: ${resource_path}`, [
+            'Ensure the resource path is correct',
+            'Use create_resource to create a new resource first',
+          ]);
+        }
+
+        const params: Record<string, unknown> = {
+          resource_path: resource_path,
+          properties: properties,
+        };
+
+        if (property_types) {
+          params.property_types = property_types;
+        }
+
+        const { stdout, stderr } = await executeOperation(
+          ctx,
+          project_path,
+          'modify_resource',
+          params,
+        );
+
+        if (stderr && (stderr.includes('Failed to') || stderr.includes('[ERROR]'))) {
+          return toolError(`Failed to modify resource: ${stderr}`, [
+            'Check that the resource file exists and is valid',
+            'Verify the property names match the resource type',
+            'Ensure property types are correct',
+          ]);
+        }
+
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Resource modified successfully: ${resource_path}\n\nOutput: ${stdout}`,
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
+        return toolError(`Failed to modify resource: ${errorMessage}`, [
           'Ensure Godot is installed correctly',
           'Check if the GODOT_PATH environment variable is set correctly',
           'Verify the project path is accessible',

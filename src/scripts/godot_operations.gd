@@ -79,6 +79,8 @@ func _init():
             attach_script(params)
         "create_resource":
             create_resource(params)
+        "modify_resource":
+            modify_resource(params)
         "validate_scripts":
             validate_scripts(params)
         "modify_project_setting":
@@ -1546,6 +1548,39 @@ func create_resource(params):
     else:
         log_error("Failed to save resource: " + str(error))
         quit(1)
+
+func modify_resource(params):
+    var resource_path = ensure_res_prefix(params.get("resource_path", ""))
+    var properties = params.get("properties", {})
+    var property_types = params.get("property_types", {})
+
+    if resource_path == "res://":
+        log_error("Missing required parameter: resource_path")
+        print(JSON.stringify({"success": false, "error": "Missing required parameter: resource_path"}))
+        return
+
+    log_info("Modifying resource at: " + resource_path)
+
+    var resource = load(resource_path)
+    if resource == null:
+        log_error("Failed to load resource: " + resource_path)
+        print(JSON.stringify({"success": false, "error": "Failed to load resource: " + resource_path}))
+        return
+
+    var count = 0
+    for prop_name in properties:
+        var type_hint = property_types.get(prop_name, "")
+        var value = convert_json_to_godot_type(properties[prop_name], type_hint)
+        resource.set(prop_name, value)
+        count += 1
+
+    var error = ResourceSaver.save(resource, resource_path)
+    if error != OK:
+        log_error("Failed to save resource: " + str(error))
+        print(JSON.stringify({"success": false, "error": "Failed to save resource: " + str(error)}))
+        return
+
+    print(JSON.stringify({"success": true, "path": resource_path, "type": resource.get_class(), "properties_set": count}))
 
 # Batch-validate all GDScript files in a project for parse errors
 func validate_scripts(params):

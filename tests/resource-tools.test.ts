@@ -1,5 +1,5 @@
 /**
- * Tests for resource MCP tools: read_resource, create_resource.
+ * Tests for resource MCP tools: read_resource, create_resource, modify_resource.
  *
  * Uses vi.mock() to isolate tool logic from filesystem and Godot process.
  */
@@ -216,6 +216,155 @@ describe('Resource MCP Tools', () => {
 
       expect(result.content[0].text).toContain('materials/ground.tres');
       expect(result.content[0].text).toContain('StandardMaterial3D');
+    });
+  });
+
+  describe('modify_resource', () => {
+    it('registers the modify_resource tool', () => {
+      expect(handlers.has('modify_resource')).toBe(true);
+    });
+
+    it('returns toolError for invalid paths', async () => {
+      vi.mocked(validatePath).mockReturnValue(false);
+
+      const handler = handlers.get('modify_resource')!;
+      const result = await handler({
+        project_path: '/bad/../path',
+        resource_path: 'materials/ground.tres',
+        properties: { albedo_color: { r: 1, g: 0, b: 0 } },
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError when project.godot missing', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const handler = handlers.get('modify_resource')!;
+      const result = await handler({
+        project_path: '/not/a/project',
+        resource_path: 'materials/ground.tres',
+        properties: { albedo_color: { r: 1, g: 0, b: 0 } },
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError when .tres file does not exist', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      // project.godot exists, but .tres file does not
+      vi.mocked(existsSync).mockImplementation((p: unknown) => {
+        return String(p).endsWith('project.godot');
+      });
+
+      const handler = handlers.get('modify_resource')!;
+      const result = await handler({
+        project_path: '/my/project',
+        resource_path: 'materials/missing.tres',
+        properties: { albedo_color: { r: 1, g: 0, b: 0 } },
+      }) as { isError?: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('create_resource');
+    });
+
+    it('passes correct params to executeOperation', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation).mockResolvedValue({
+        stdout: '{"success":true,"path":"res://materials/ground.tres","type":"StandardMaterial3D","properties_set":1}',
+        stderr: '',
+      });
+
+      const handler = handlers.get('modify_resource')!;
+      await handler({
+        project_path: '/my/project',
+        resource_path: 'materials/ground.tres',
+        properties: { albedo_color: { r: 1, g: 0, b: 0 } },
+        property_types: { albedo_color: 'Color' },
+      });
+
+      expect(executeOperation).toHaveBeenCalledWith(
+        ctx,
+        '/my/project',
+        'modify_resource',
+        expect.objectContaining({
+          resource_path: 'materials/ground.tres',
+          properties: { albedo_color: { r: 1, g: 0, b: 0 } },
+          property_types: { albedo_color: 'Color' },
+        }),
+      );
+    });
+
+    it('omits property_types when not provided', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation).mockResolvedValue({
+        stdout: '{"success":true,"path":"res://materials/ground.tres","type":"StandardMaterial3D","properties_set":1}',
+        stderr: '',
+      });
+
+      const handler = handlers.get('modify_resource')!;
+      await handler({
+        project_path: '/my/project',
+        resource_path: 'materials/ground.tres',
+        properties: { roughness: 0.5 },
+      });
+
+      const callArgs = vi.mocked(executeOperation).mock.calls[0][3] as Record<string, unknown>;
+      expect(callArgs).not.toHaveProperty('property_types');
+    });
+
+    it('returns success message with resource path', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation).mockResolvedValue({
+        stdout: '{"success":true,"path":"res://materials/ground.tres","type":"StandardMaterial3D","properties_set":1}',
+        stderr: '',
+      });
+
+      const handler = handlers.get('modify_resource')!;
+      const result = await handler({
+        project_path: '/my/project',
+        resource_path: 'materials/ground.tres',
+        properties: { roughness: 0.5 },
+      }) as { content: Array<{ type: string; text: string }> };
+
+      expect(result.content[0].text).toContain('materials/ground.tres');
+    });
+
+    it('returns toolError on stderr failure', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation).mockResolvedValue({
+        stdout: '',
+        stderr: '[ERROR] Failed to load resource',
+      });
+
+      const handler = handlers.get('modify_resource')!;
+      const result = await handler({
+        project_path: '/my/project',
+        resource_path: 'materials/ground.tres',
+        properties: { roughness: 0.5 },
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError on exception', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation).mockRejectedValue(new Error('Godot crashed'));
+
+      const handler = handlers.get('modify_resource')!;
+      const result = await handler({
+        project_path: '/my/project',
+        resource_path: 'materials/ground.tres',
+        properties: { roughness: 0.5 },
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
     });
   });
 });
