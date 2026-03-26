@@ -1,5 +1,5 @@
 /**
- * Export tool domain: export_project, list_export_presets.
+ * Export tool domain: export_project, list_export_presets, check_export_readiness.
  *
  * export_project uses execGodot directly (NOT executeOperation) since
  * Godot export is a CLI operation (--export-release / --export-debug flag),
@@ -233,6 +233,211 @@ export function registerExportTools(server: McpServer, ctx: ServerContext): void
         return toolError(`Failed to list export presets: ${errorMessage}`, [
           'Ensure the export_presets.cfg file is readable',
           'Check if the project path is correct',
+        ]);
+      }
+    },
+  );
+
+  // Tool: check_export_readiness
+  server.registerTool(
+    'check_export_readiness',
+    {
+      title: 'Check Export Readiness',
+      description:
+        'Validate a Godot project\'s configuration for mobile/web export readiness. Returns a pass/warn/fail report based on real lessons from production game development.',
+      inputSchema: {
+        project_path: z.string().describe('Path to the Godot project directory'),
+        platform: z
+          .enum(['android', 'ios', 'web', 'all'])
+          .optional()
+          .default('all')
+          .describe("Target platform to check: 'android', 'ios', 'web', or 'all' (default)"),
+      },
+    },
+    async ({ project_path, platform }) => {
+      if (!validatePath(project_path as string)) {
+        return toolError('Invalid path', [
+          'Provide valid paths without ".." or other potentially unsafe characters',
+        ]);
+      }
+
+      try {
+        const projectFile = join(project_path as string, 'project.godot');
+        if (!existsSync(projectFile)) {
+          return toolError(`Not a valid Godot project: ${project_path}`, [
+            'Ensure the path points to a directory containing a project.godot file',
+            'Use list_projects to find valid Godot projects',
+          ]);
+        }
+
+        const content = readFileSync(projectFile, 'utf-8');
+        const parsed = parseProjectSettings(content);
+        const targetPlatform = (platform as string) || 'all';
+
+        const checks: Array<{ check: string; status: 'pass' | 'warn' | 'fail'; detail: string }> =
+          [];
+
+        const appliesTo = (...platforms: string[]) =>
+          targetPlatform === 'all' || platforms.includes(targetPlatform);
+
+        // (a) Renderer check — all platforms
+        if (appliesTo('android', 'ios', 'web')) {
+          const renderingSection = parsed.sections['rendering'] || {};
+          const renderer = renderingSection['renderer/rendering_method'];
+          if (renderer === 'gl_compatibility') {
+            checks.push({
+              check: 'Renderer',
+              status: 'pass',
+              detail: 'gl_compatibility — broadest device support',
+            });
+          } else {
+            checks.push({
+              check: 'Renderer',
+              status: 'warn',
+              detail: `Current: ${renderer || 'not set (defaults to forward_plus)'}. gl_compatibility recommended for broadest device support`,
+            });
+          }
+        }
+
+        // (b) Texture compression — android
+        if (appliesTo('android')) {
+          const renderingSection = parsed.sections['rendering'] || {};
+          const etc2 = renderingSection['textures/vram_compression/import_etc2_astc'];
+          if (etc2 === 'true') {
+            checks.push({
+              check: 'Texture compression (ETC2/ASTC)',
+              status: 'pass',
+              detail: 'ETC2/ASTC compression enabled',
+            });
+          } else {
+            checks.push({
+              check: 'Texture compression (ETC2/ASTC)',
+              status: 'fail',
+              detail: 'ETC2/ASTC compression required for Android',
+            });
+          }
+        }
+
+        // (c) Display orientation — android, ios
+        if (appliesTo('android', 'ios')) {
+          const displaySection = parsed.sections['display'] || {};
+          const orientation = displaySection['window/handheld/orientation'];
+          if (orientation) {
+            const stripped = orientation.replace(/^"|"$/g, '');
+            if (['portrait', 'reverse_portrait', 'sensor_portrait'].includes(stripped)) {
+              checks.push({
+                check: 'Display orientation',
+                status: 'pass',
+                detail: `Orientation set to ${stripped}`,
+              });
+            } else {
+              checks.push({
+                check: 'Display orientation',
+                status: 'warn',
+                detail: `Orientation is ${stripped}. Set to portrait for typical mobile games`,
+              });
+            }
+          } else {
+            checks.push({
+              check: 'Display orientation',
+              status: 'warn',
+              detail: 'No orientation set — defaults to landscape',
+            });
+          }
+        }
+
+        // (d) Stretch mode — all platforms
+        if (appliesTo('android', 'ios', 'web')) {
+          const displaySection = parsed.sections['display'] || {};
+          const stretchMode = displaySection['window/stretch/mode'];
+          if (stretchMode) {
+            const stripped = stretchMode.replace(/^"|"$/g, '');
+            if (stripped === 'canvas_items' || stripped === 'viewport') {
+              checks.push({
+                check: 'Stretch mode',
+                status: 'pass',
+                detail: `Stretch mode set to ${stripped}`,
+              });
+            } else {
+              checks.push({
+                check: 'Stretch mode',
+                status: 'warn',
+                detail: `Stretch mode is ${stripped} — canvas_items recommended for responsive UI`,
+              });
+            }
+          } else {
+            checks.push({
+              check: 'Stretch mode',
+              status: 'warn',
+              detail: 'No stretch mode configured — set to canvas_items for responsive UI',
+            });
+          }
+        }
+
+        // (e) Export presets exist
+        const presets = parseExportPresets(project_path as string);
+        if (presets.length === 0) {
+          checks.push({
+            check: 'Export presets',
+            status: 'fail',
+            detail: 'No export presets found — create them in Project > Export > Add...',
+          });
+        } else if (targetPlatform !== 'all') {
+          const platformMap: Record<string, string> = {
+            android: 'Android',
+            ios: 'iOS',
+            web: 'Web',
+          };
+          const platformName = platformMap[targetPlatform] || targetPlatform;
+          const hasPreset = presets.some(
+            (p) => p.platform.toLowerCase() === platformName.toLowerCase(),
+          );
+          if (hasPreset) {
+            checks.push({
+              check: 'Export presets',
+              status: 'pass',
+              detail: `Found export preset for ${platformName}`,
+            });
+          } else {
+            checks.push({
+              check: 'Export presets',
+              status: 'fail',
+              detail: `No export preset for ${platformName}. Available: ${presets.map((p) => p.platform).join(', ')}`,
+            });
+          }
+        } else {
+          checks.push({
+            check: 'Export presets',
+            status: 'pass',
+            detail: `Found ${presets.length} export preset(s): ${presets.map((p) => p.platform).join(', ')}`,
+          });
+        }
+
+        // (f) Audio format tip — all platforms
+        checks.push({
+          check: 'Audio format',
+          status: 'warn',
+          detail: 'Ensure audio uses OGG Vorbis (music) and WAV (SFX) — never MP3',
+        });
+
+        const summary = {
+          pass: checks.filter((c) => c.status === 'pass').length,
+          warn: checks.filter((c) => c.status === 'warn').length,
+          fail: checks.filter((c) => c.status === 'fail').length,
+        };
+
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify({ platform: targetPlatform, checks, summary }),
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        return toolError(`Export readiness check failed: ${errorMessage}`, [
+          'Ensure the project path is correct and project.godot is readable',
         ]);
       }
     },

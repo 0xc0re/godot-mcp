@@ -594,4 +594,302 @@ describe('Export MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
   });
+
+  // ── check_export_readiness ────────────────────────────────────────
+
+  describe('check_export_readiness', () => {
+    it('registers the check_export_readiness tool', () => {
+      expect(handlers.has('check_export_readiness')).toBe(true);
+    });
+
+    it('returns toolError when validatePath fails', async () => {
+      vi.mocked(validatePath).mockReturnValue(false);
+
+      const handler = handlers.get('check_export_readiness')!;
+      const result = await handler({
+        project_path: '/bad/../path',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError when project.godot missing', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const handler = handlers.get('check_export_readiness')!;
+      const result = await handler({
+        project_path: '/not/a/project',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns pass for gl_compatibility renderer', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockImplementation((p) => {
+        if (String(p).endsWith('project.godot')) return true;
+        // export_presets.cfg exists
+        if (String(p).endsWith('export_presets.cfg')) return true;
+        return false;
+      });
+      vi.mocked(readFileSync).mockReturnValue('');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          rendering: { 'renderer/rendering_method': 'gl_compatibility' },
+          display: { 'window/stretch/mode': '"canvas_items"' },
+          'preset.0': { name: '"Web"', platform: '"Web"', runnable: 'true' },
+        },
+        configVersion: 0,
+      });
+
+      const handler = handlers.get('check_export_readiness')!;
+      const result = await handler({
+        project_path: '/my/project',
+        platform: 'web',
+      }) as { content: Array<{ text: string }> };
+
+      const parsed = JSON.parse(result.content[0].text);
+      const rendererCheck = parsed.checks.find((c: { check: string }) => c.check === 'Renderer');
+      expect(rendererCheck).toBeDefined();
+      expect(rendererCheck.status).toBe('pass');
+      expect(rendererCheck.detail).toContain('gl_compatibility');
+    });
+
+    it('returns warn for forward_plus renderer', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockImplementation((p) => {
+        if (String(p).endsWith('project.godot')) return true;
+        if (String(p).endsWith('export_presets.cfg')) return true;
+        return false;
+      });
+      vi.mocked(readFileSync).mockReturnValue('');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          rendering: { 'renderer/rendering_method': 'forward_plus' },
+          display: { 'window/stretch/mode': '"canvas_items"' },
+          'preset.0': { name: '"Android"', platform: '"Android"', runnable: 'true' },
+        },
+        configVersion: 0,
+      });
+
+      const handler = handlers.get('check_export_readiness')!;
+      const result = await handler({
+        project_path: '/my/project',
+        platform: 'android',
+      }) as { content: Array<{ text: string }> };
+
+      const parsed = JSON.parse(result.content[0].text);
+      const rendererCheck = parsed.checks.find((c: { check: string }) => c.check === 'Renderer');
+      expect(rendererCheck).toBeDefined();
+      expect(rendererCheck.status).toBe('warn');
+      expect(rendererCheck.detail).toContain('forward_plus');
+    });
+
+    it('returns fail for missing ETC2/ASTC compression on android', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockImplementation((p) => {
+        if (String(p).endsWith('project.godot')) return true;
+        if (String(p).endsWith('export_presets.cfg')) return true;
+        return false;
+      });
+      vi.mocked(readFileSync).mockReturnValue('');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          rendering: { 'renderer/rendering_method': 'gl_compatibility' },
+          display: {
+            'window/handheld/orientation': '"portrait"',
+            'window/stretch/mode': '"canvas_items"',
+          },
+          'preset.0': { name: '"Android"', platform: '"Android"', runnable: 'true' },
+        },
+        configVersion: 0,
+      });
+
+      const handler = handlers.get('check_export_readiness')!;
+      const result = await handler({
+        project_path: '/my/project',
+        platform: 'android',
+      }) as { content: Array<{ text: string }> };
+
+      const parsed = JSON.parse(result.content[0].text);
+      const textureCheck = parsed.checks.find(
+        (c: { check: string }) => c.check === 'Texture compression (ETC2/ASTC)',
+      );
+      expect(textureCheck).toBeDefined();
+      expect(textureCheck.status).toBe('fail');
+      expect(textureCheck.detail).toContain('ETC2/ASTC compression required');
+    });
+
+    it('returns pass for portrait orientation on android', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockImplementation((p) => {
+        if (String(p).endsWith('project.godot')) return true;
+        if (String(p).endsWith('export_presets.cfg')) return true;
+        return false;
+      });
+      vi.mocked(readFileSync).mockReturnValue('');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          rendering: {
+            'renderer/rendering_method': 'gl_compatibility',
+            'textures/vram_compression/import_etc2_astc': 'true',
+          },
+          display: {
+            'window/handheld/orientation': '"portrait"',
+            'window/stretch/mode': '"canvas_items"',
+          },
+          'preset.0': { name: '"Android"', platform: '"Android"', runnable: 'true' },
+        },
+        configVersion: 0,
+      });
+
+      const handler = handlers.get('check_export_readiness')!;
+      const result = await handler({
+        project_path: '/my/project',
+        platform: 'android',
+      }) as { content: Array<{ text: string }> };
+
+      const parsed = JSON.parse(result.content[0].text);
+      const orientationCheck = parsed.checks.find(
+        (c: { check: string }) => c.check === 'Display orientation',
+      );
+      expect(orientationCheck).toBeDefined();
+      expect(orientationCheck.status).toBe('pass');
+      expect(orientationCheck.detail).toContain('portrait');
+    });
+
+    it('returns warn when no orientation set', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockImplementation((p) => {
+        if (String(p).endsWith('project.godot')) return true;
+        if (String(p).endsWith('export_presets.cfg')) return true;
+        return false;
+      });
+      vi.mocked(readFileSync).mockReturnValue('');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          rendering: {
+            'renderer/rendering_method': 'gl_compatibility',
+            'textures/vram_compression/import_etc2_astc': 'true',
+          },
+          display: {
+            'window/stretch/mode': '"canvas_items"',
+          },
+          'preset.0': { name: '"Android"', platform: '"Android"', runnable: 'true' },
+        },
+        configVersion: 0,
+      });
+
+      const handler = handlers.get('check_export_readiness')!;
+      const result = await handler({
+        project_path: '/my/project',
+        platform: 'android',
+      }) as { content: Array<{ text: string }> };
+
+      const parsed = JSON.parse(result.content[0].text);
+      const orientationCheck = parsed.checks.find(
+        (c: { check: string }) => c.check === 'Display orientation',
+      );
+      expect(orientationCheck).toBeDefined();
+      expect(orientationCheck.status).toBe('warn');
+      expect(orientationCheck.detail).toContain('No orientation set');
+    });
+
+    it('returns pass for canvas_items stretch mode', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockImplementation((p) => {
+        if (String(p).endsWith('project.godot')) return true;
+        if (String(p).endsWith('export_presets.cfg')) return true;
+        return false;
+      });
+      vi.mocked(readFileSync).mockReturnValue('');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          rendering: { 'renderer/rendering_method': 'gl_compatibility' },
+          display: { 'window/stretch/mode': '"canvas_items"' },
+          'preset.0': { name: '"Web"', platform: '"Web"', runnable: 'true' },
+        },
+        configVersion: 0,
+      });
+
+      const handler = handlers.get('check_export_readiness')!;
+      const result = await handler({
+        project_path: '/my/project',
+        platform: 'web',
+      }) as { content: Array<{ text: string }> };
+
+      const parsed = JSON.parse(result.content[0].text);
+      const stretchCheck = parsed.checks.find(
+        (c: { check: string }) => c.check === 'Stretch mode',
+      );
+      expect(stretchCheck).toBeDefined();
+      expect(stretchCheck.status).toBe('pass');
+      expect(stretchCheck.detail).toContain('canvas_items');
+    });
+
+    it('returns fail when no export presets exist', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockImplementation((p) => {
+        if (String(p).endsWith('project.godot')) return true;
+        // export_presets.cfg does NOT exist
+        return false;
+      });
+      vi.mocked(readFileSync).mockReturnValue('');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          rendering: { 'renderer/rendering_method': 'gl_compatibility' },
+          display: { 'window/stretch/mode': '"canvas_items"' },
+        },
+        configVersion: 0,
+      });
+
+      const handler = handlers.get('check_export_readiness')!;
+      const result = await handler({
+        project_path: '/my/project',
+        platform: 'web',
+      }) as { content: Array<{ text: string }> };
+
+      const parsed = JSON.parse(result.content[0].text);
+      const presetCheck = parsed.checks.find(
+        (c: { check: string }) => c.check === 'Export presets',
+      );
+      expect(presetCheck).toBeDefined();
+      expect(presetCheck.status).toBe('fail');
+      expect(presetCheck.detail).toContain('No export presets found');
+    });
+
+    it('returns the audio format warning tip', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockImplementation((p) => {
+        if (String(p).endsWith('project.godot')) return true;
+        if (String(p).endsWith('export_presets.cfg')) return true;
+        return false;
+      });
+      vi.mocked(readFileSync).mockReturnValue('');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          rendering: { 'renderer/rendering_method': 'gl_compatibility' },
+          display: { 'window/stretch/mode': '"canvas_items"' },
+          'preset.0': { name: '"Web"', platform: '"Web"', runnable: 'true' },
+        },
+        configVersion: 0,
+      });
+
+      const handler = handlers.get('check_export_readiness')!;
+      const result = await handler({
+        project_path: '/my/project',
+        platform: 'web',
+      }) as { content: Array<{ text: string }> };
+
+      const parsed = JSON.parse(result.content[0].text);
+      const audioCheck = parsed.checks.find(
+        (c: { check: string }) => c.check === 'Audio format',
+      );
+      expect(audioCheck).toBeDefined();
+      expect(audioCheck.status).toBe('warn');
+      expect(audioCheck.detail).toContain('OGG Vorbis');
+      expect(audioCheck.detail).toContain('never MP3');
+    });
+  });
 });

@@ -9,12 +9,15 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
 import { spawn } from 'child_process';
 import { Socket } from 'net';
 import type { ServerContext } from '../types.js';
 import { validatePath, trackProcess } from '../godot.js';
 import { toolError } from '../errors.js';
 import { LspClient } from '../lsp/client.js';
+import { parseScene } from '../parsers/tscn-parser.js';
+import { parseProjectSettings } from '../parsers/project-parser.js';
 
 /** Default LSP port for MCP-spawned headless editor (avoids conflict with user's editor on 6005) */
 const DEFAULT_LSP_PORT = 6014;
@@ -169,6 +172,258 @@ export function registerDiagnosticsTools(server: McpServer, ctx: ServerContext):
           'Check if Godot is installed and accessible',
           'Verify the project path contains a valid project.godot file',
           'Try specifying a different port if the default is in use',
+        ]);
+      }
+    },
+  );
+
+  // validate_scene — static analysis of .tscn files for common issues
+  server.registerTool(
+    'validate_scene',
+    {
+      title: 'Validate Scene',
+      description:
+        'Analyze a .tscn scene file for common issues that cause silent bugs in Godot games. ' +
+        'Checks for physics bodies without collision shapes, Area nodes without shapes, ' +
+        'duplicate sibling node names, and root scripts that reference autoloads (MCP corruption risk).',
+      inputSchema: {
+        project_path: z.string().describe('Path to the Godot project directory'),
+        scene_path: z
+          .string()
+          .describe(
+            'Path to the scene file relative to project root (e.g., "scenes/player.tscn")',
+          ),
+      },
+    },
+    async ({ project_path, scene_path }) => {
+      if (!validatePath(project_path) || !validatePath(scene_path)) {
+        return toolError('Invalid path', [
+          'Provide valid paths without ".." or other potentially unsafe characters',
+        ]);
+      }
+
+      try {
+        const projectFile = join(project_path, 'project.godot');
+        if (!existsSync(projectFile)) {
+          return toolError(`Not a valid Godot project: ${project_path}`, [
+            'Ensure the path points to a directory containing a project.godot file',
+            'Use list_projects to find valid Godot projects',
+          ]);
+        }
+
+        const sceneFilePath = join(project_path, scene_path);
+        if (!existsSync(sceneFilePath)) {
+          return toolError(`Scene file does not exist: ${scene_path}`, [
+            'Ensure the scene path is correct',
+            'Use create_scene to create a new scene first',
+          ]);
+        }
+
+        const content = readFileSync(sceneFilePath, 'utf-8');
+        const parsed = parseScene(content);
+
+        interface Issue {
+          check: string;
+          severity: 'error' | 'warning' | 'info';
+          nodes: string[];
+          detail: string;
+        }
+
+        const issues: Issue[] = [];
+
+        // Build a helper to compute the full path of a node.
+        // Root node (no parent) => its name. Direct children (parent=".") => "RootName/ChildName".
+        // Deeper children (parent="A/B") => "RootName/A/B/ChildName".
+        const rootNode = parsed.nodes.length > 0 ? parsed.nodes[0] : null;
+        const rootName = rootNode?.name ?? '';
+
+        function fullPath(node: typeof parsed.nodes[0]): string {
+          if (!node.parent) return node.name; // root node
+          if (node.parent === '.') return `${rootName}/${node.name}`;
+          return `${rootName}/${node.parent}/${node.name}`;
+        }
+
+        // Build a map of parent path -> child nodes for sibling and child lookups
+        const childrenByParentPath = new Map<string, typeof parsed.nodes>();
+        for (const node of parsed.nodes) {
+          if (!node.parent) continue; // root node has no parent
+          // Compute the full path of the parent
+          let parentFullPath: string;
+          if (node.parent === '.') {
+            parentFullPath = rootName;
+          } else {
+            parentFullPath = `${rootName}/${node.parent}`;
+          }
+          if (!childrenByParentPath.has(parentFullPath)) {
+            childrenByParentPath.set(parentFullPath, []);
+          }
+          childrenByParentPath.get(parentFullPath)!.push(node);
+        }
+
+        // (a) Physics bodies without collision shapes
+        const bodyTypes = [
+          'CharacterBody2D', 'CharacterBody3D',
+          'RigidBody2D', 'RigidBody3D',
+          'StaticBody2D', 'StaticBody3D',
+          'AnimatableBody2D', 'AnimatableBody3D',
+        ];
+        const collisionTypes = [
+          'CollisionShape2D', 'CollisionShape3D',
+          'CollisionPolygon2D', 'CollisionPolygon3D',
+        ];
+
+        const bodiesWithoutCollision: string[] = [];
+        for (const node of parsed.nodes) {
+          if (!node.type || !bodyTypes.some((bt) => node.type!.includes('Body') && node.type === bt)) continue;
+          const nodePath = fullPath(node);
+          const children = childrenByParentPath.get(nodePath) ?? [];
+          const hasCollision = children.some(
+            (child) => child.type !== undefined && collisionTypes.includes(child.type),
+          );
+          if (!hasCollision) {
+            bodiesWithoutCollision.push(nodePath);
+          }
+        }
+        if (bodiesWithoutCollision.length > 0) {
+          issues.push({
+            check: 'physics_body_without_collision_shape',
+            severity: 'error',
+            nodes: bodiesWithoutCollision,
+            detail:
+              'Physics body nodes require at least one CollisionShape or CollisionPolygon child to function. ' +
+              'Without a shape, the body will not interact with other physics objects.',
+          });
+        }
+
+        // (c) Area nodes without collision shapes
+        const areaTypes = ['Area2D', 'Area3D'];
+        const areasWithoutCollision: string[] = [];
+        for (const node of parsed.nodes) {
+          if (!node.type || !areaTypes.includes(node.type)) continue;
+          const nodePath = fullPath(node);
+          const children = childrenByParentPath.get(nodePath) ?? [];
+          const hasCollision = children.some(
+            (child) => child.type !== undefined && collisionTypes.includes(child.type),
+          );
+          if (!hasCollision) {
+            areasWithoutCollision.push(nodePath);
+          }
+        }
+        if (areasWithoutCollision.length > 0) {
+          issues.push({
+            check: 'area_without_collision_shape',
+            severity: 'warning',
+            nodes: areasWithoutCollision,
+            detail:
+              'Area nodes without a CollisionShape or CollisionPolygon child cannot detect overlaps or collisions. ' +
+              'This is sometimes intentional but usually indicates a missing shape.',
+          });
+        }
+
+        // (d) Duplicate sibling node names
+        const duplicateNodes: string[] = [];
+        for (const [parentPath, children] of childrenByParentPath.entries()) {
+          const nameCount = new Map<string, number>();
+          for (const child of children) {
+            nameCount.set(child.name, (nameCount.get(child.name) ?? 0) + 1);
+          }
+          for (const [name, count] of nameCount.entries()) {
+            if (count > 1) {
+              duplicateNodes.push(`${parentPath}/${name} (x${count})`);
+            }
+          }
+        }
+        if (duplicateNodes.length > 0) {
+          issues.push({
+            check: 'duplicate_sibling_names',
+            severity: 'warning',
+            nodes: duplicateNodes,
+            detail:
+              'Multiple sibling nodes share the same name. Godot will auto-rename them at runtime, ' +
+              'which can cause get_node() calls to return unexpected nodes.',
+          });
+        }
+
+        // (b) Root script references autoloads (MCP corruption risk)
+        if (rootNode) {
+          // Find if root node has a script ext_resource reference
+          const scriptProp = rootNode.properties['script'];
+          if (scriptProp) {
+            // scriptProp looks like: ExtResource("1_abc") or ExtResource("2")
+            const extResMatch = scriptProp.match(/ExtResource\("([^"]+)"\)/);
+            if (extResMatch) {
+              const extResId = extResMatch[1];
+              const scriptResource = parsed.extResources.find(
+                (r) => r.id === extResId && r.type === 'Script',
+              );
+              if (scriptResource) {
+                // Convert res:// path to filesystem path
+                const scriptResPath = scriptResource.path.replace(/^res:\/\//, '');
+                const scriptFilePath = join(project_path, scriptResPath);
+                if (existsSync(scriptFilePath)) {
+                  const scriptContent = readFileSync(scriptFilePath, 'utf-8');
+
+                  // Parse project.godot to get autoload names
+                  const projectContent = readFileSync(projectFile, 'utf-8');
+                  const projectSettings = parseProjectSettings(projectContent);
+                  const autoloadSection = projectSettings.sections['autoload'] ?? {};
+                  const autoloadNames = Object.keys(autoloadSection);
+
+                  const referencedAutoloads: string[] = [];
+                  for (const autoloadName of autoloadNames) {
+                    // Check if the autoload name appears in the script as a standalone identifier
+                    // (word boundary match to avoid false positives)
+                    const regex = new RegExp(`\\b${autoloadName}\\b`);
+                    if (regex.test(scriptContent)) {
+                      referencedAutoloads.push(autoloadName);
+                    }
+                  }
+
+                  if (referencedAutoloads.length > 0) {
+                    issues.push({
+                      check: 'root_script_references_autoloads',
+                      severity: 'warning',
+                      nodes: [rootName],
+                      detail:
+                        `Root script "${scriptResPath}" references autoloads: ${referencedAutoloads.join(', ')}. ` +
+                        'MCP add_node/modify_node may corrupt this scene when Godot re-saves it. ' +
+                        'Use manual .tscn editing instead.',
+                    });
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        const summary = {
+          errors: issues.filter((i) => i.severity === 'error').length,
+          warnings: issues.filter((i) => i.severity === 'warning').length,
+          info: issues.filter((i) => i.severity === 'info').length,
+        };
+
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(
+                {
+                  scene_path,
+                  issues,
+                  summary,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        return toolError(`Failed to validate scene: ${errorMessage}`, [
+          'Ensure the scene file is a valid .tscn file',
+          'Check if the file is not corrupted',
+          'Verify the scene and project paths are correct',
         ]);
       }
     },

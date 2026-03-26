@@ -1,6 +1,8 @@
 /**
  * Tests for project configuration MCP tools: add_input_action,
- * remove_input_action, list_input_actions.
+ * remove_input_action, list_input_actions, get_collision_layer_names,
+ * set_collision_layer_names, set_node_collision, list_autoloads,
+ * add_autoload, remove_autoload.
  *
  * Uses vi.mock() to isolate tool logic from filesystem and Godot process.
  */
@@ -465,6 +467,864 @@ describe('Config MCP Tools', () => {
       const handler = handlers.get('list_input_actions')!;
       const result = await handler({
         project_path: '/my/project',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  // ── get_collision_layer_names ────────────────────────────────────────
+
+  describe('get_collision_layer_names', () => {
+    it('registers the get_collision_layer_names tool', () => {
+      expect(handlers.has('get_collision_layer_names')).toBe(true);
+    });
+
+    it('returns toolError when validatePath fails', async () => {
+      vi.mocked(validatePath).mockReturnValue(false);
+
+      const handler = handlers.get('get_collision_layer_names')!;
+      const result = await handler({
+        project_path: '/bad/../path',
+        physics_type: '3d',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError when project.godot missing', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const handler = handlers.get('get_collision_layer_names')!;
+      const result = await handler({
+        project_path: '/not/a/project',
+        physics_type: '3d',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('reads project.godot and returns layer names from [layer_names] section', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('file content');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          layer_names: {
+            '3d_physics/layer_1': '"Player"',
+            '3d_physics/layer_2': '"Environment"',
+            '3d_physics/layer_3': '"Enemy"',
+          },
+        },
+        configVersion: 5,
+      });
+
+      const handler = handlers.get('get_collision_layer_names')!;
+      const result = await handler({
+        project_path: '/my/project',
+        physics_type: '3d',
+      }) as { content: Array<{ text: string }> };
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.physics_type).toBe('3d');
+      expect(parsed.layers).toEqual({
+        '1': 'Player',
+        '2': 'Environment',
+        '3': 'Enemy',
+      });
+    });
+
+    it('returns empty layers when no layer_names section exists', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('file content');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          application: { 'config/name': '"MyGame"' },
+        },
+        configVersion: 5,
+      });
+
+      const handler = handlers.get('get_collision_layer_names')!;
+      const result = await handler({
+        project_path: '/my/project',
+        physics_type: '3d',
+      }) as { content: Array<{ text: string }> };
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.layers).toEqual({});
+    });
+
+    it('filters by physics_type prefix (2d vs 3d)', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('file content');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          layer_names: {
+            '3d_physics/layer_1': '"Player3D"',
+            '2d_physics/layer_1': '"Player2D"',
+            '2d_physics/layer_2': '"Terrain2D"',
+          },
+        },
+        configVersion: 5,
+      });
+
+      const handler = handlers.get('get_collision_layer_names')!;
+      const result = await handler({
+        project_path: '/my/project',
+        physics_type: '2d',
+      }) as { content: Array<{ text: string }> };
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.physics_type).toBe('2d');
+      expect(parsed.layers).toEqual({
+        '1': 'Player2D',
+        '2': 'Terrain2D',
+      });
+      // Should NOT include 3d layers
+      expect(parsed.layers).not.toHaveProperty('Player3D');
+    });
+
+    it('returns toolError on readFileSync exception', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockImplementation(() => {
+        throw new Error('Permission denied');
+      });
+
+      const handler = handlers.get('get_collision_layer_names')!;
+      const result = await handler({
+        project_path: '/my/project',
+        physics_type: '3d',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  // ── set_collision_layer_names ────────────────────────────────────────
+
+  describe('set_collision_layer_names', () => {
+    it('registers the set_collision_layer_names tool', () => {
+      expect(handlers.has('set_collision_layer_names')).toBe(true);
+    });
+
+    it('returns toolError when validatePath fails', async () => {
+      vi.mocked(validatePath).mockReturnValue(false);
+
+      const handler = handlers.get('set_collision_layer_names')!;
+      const result = await handler({
+        project_path: '/bad/../path',
+        physics_type: '3d',
+        layers: [{ layer: 1, name: 'Player' }],
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError when project.godot missing', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const handler = handlers.get('set_collision_layer_names')!;
+      const result = await handler({
+        project_path: '/not/a/project',
+        physics_type: '3d',
+        layers: [{ layer: 1, name: 'Player' }],
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('calls executeOperation with modify_project_setting for each layer', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+
+      const handler = handlers.get('set_collision_layer_names')!;
+      await handler({
+        project_path: '/my/project',
+        physics_type: '3d',
+        layers: [
+          { layer: 1, name: 'Player' },
+          { layer: 2, name: 'Environment' },
+        ],
+      });
+
+      expect(executeOperation).toHaveBeenCalledTimes(2);
+      expect(executeOperation).toHaveBeenCalledWith(
+        ctx,
+        '/my/project',
+        'modify_project_setting',
+        { section: 'layer_names', key: '3d_physics/layer_1', value: 'Player', action: 'set' },
+      );
+      expect(executeOperation).toHaveBeenCalledWith(
+        ctx,
+        '/my/project',
+        'modify_project_setting',
+        { section: 'layer_names', key: '3d_physics/layer_2', value: 'Environment', action: 'set' },
+      );
+    });
+
+    it('returns success with layers_set array', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+
+      const handler = handlers.get('set_collision_layer_names')!;
+      const result = await handler({
+        project_path: '/my/project',
+        physics_type: '3d',
+        layers: [
+          { layer: 1, name: 'Player' },
+          { layer: 3, name: 'Enemy' },
+        ],
+      }) as { content: Array<{ text: string }> };
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.physics_type).toBe('3d');
+      expect(parsed.layers_set).toEqual([
+        { layer: 1, name: 'Player', success: true },
+        { layer: 3, name: 'Enemy', success: true },
+      ]);
+    });
+
+    it('marks individual layers as failed when stderr contains error', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation)
+        .mockResolvedValueOnce({ stdout: '{"success":true}', stderr: '' })
+        .mockResolvedValueOnce({ stdout: '', stderr: 'Failed to modify setting' });
+
+      const handler = handlers.get('set_collision_layer_names')!;
+      const result = await handler({
+        project_path: '/my/project',
+        physics_type: '3d',
+        layers: [
+          { layer: 1, name: 'Player' },
+          { layer: 2, name: 'Environment' },
+        ],
+      }) as { content: Array<{ text: string }> };
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.success).toBe(false);
+      expect(parsed.layers_set[0].success).toBe(true);
+      expect(parsed.layers_set[1].success).toBe(false);
+    });
+
+    it('returns toolError on executeOperation exception', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
+
+      const handler = handlers.get('set_collision_layer_names')!;
+      const result = await handler({
+        project_path: '/my/project',
+        physics_type: '3d',
+        layers: [{ layer: 1, name: 'Player' }],
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  // ── set_node_collision ───────────────────────────────────────────────
+
+  describe('set_node_collision', () => {
+    it('registers the set_node_collision tool', () => {
+      expect(handlers.has('set_node_collision')).toBe(true);
+    });
+
+    it('returns toolError when validatePath fails', async () => {
+      vi.mocked(validatePath).mockReturnValue(false);
+
+      const handler = handlers.get('set_node_collision')!;
+      const result = await handler({
+        project_path: '/bad/../path',
+        scene_path: 'scenes/player.tscn',
+        node_path: '.',
+        collision_layer: ['Player'],
+        physics_type: '3d',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError when project.godot missing', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const handler = handlers.get('set_node_collision')!;
+      const result = await handler({
+        project_path: '/not/a/project',
+        scene_path: 'scenes/player.tscn',
+        node_path: '.',
+        collision_layer: ['Player'],
+        physics_type: '3d',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError when neither collision_layer nor collision_mask provided', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+
+      const handler = handlers.get('set_node_collision')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/player.tscn',
+        node_path: '.',
+        physics_type: '3d',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('resolves layer names to bitmask correctly (layer 1 = 1, layer 3 = 4, combined = 5)', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('file content');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          layer_names: {
+            '3d_physics/layer_1': '"Player"',
+            '3d_physics/layer_2': '"Environment"',
+            '3d_physics/layer_3': '"Enemy"',
+          },
+        },
+        configVersion: 5,
+      });
+      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+
+      const handler = handlers.get('set_node_collision')!;
+      await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/player.tscn',
+        node_path: '.',
+        collision_layer: ['Player', 'Enemy'],
+        physics_type: '3d',
+      });
+
+      // layer 1 (Player) = bit 0 = 1, layer 3 (Enemy) = bit 2 = 4, combined = 5
+      expect(executeOperation).toHaveBeenCalledWith(
+        ctx,
+        '/my/project',
+        'modify_node_property',
+        {
+          scenePath: 'scenes/player.tscn',
+          nodePath: '.',
+          property: 'collision_layer',
+          value: 5,
+        },
+      );
+    });
+
+    it('returns toolError for unknown layer names', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('file content');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          layer_names: {
+            '3d_physics/layer_1': '"Player"',
+            '3d_physics/layer_2': '"Environment"',
+            '3d_physics/layer_3': '"Enemy"',
+          },
+        },
+        configVersion: 5,
+      });
+
+      const handler = handlers.get('set_node_collision')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/player.tscn',
+        node_path: '.',
+        collision_layer: ['Player', 'NonExistent'],
+        physics_type: '3d',
+      }) as { isError?: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBe(true);
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.error).toContain('NonExistent');
+    });
+
+    it('calls executeOperation with modify_node_property for both collision_layer and collision_mask', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('file content');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          layer_names: {
+            '3d_physics/layer_1': '"Player"',
+            '3d_physics/layer_2': '"Environment"',
+            '3d_physics/layer_3': '"Enemy"',
+          },
+        },
+        configVersion: 5,
+      });
+      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+
+      const handler = handlers.get('set_node_collision')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/player.tscn',
+        node_path: 'Player/CollisionShape3D',
+        collision_layer: ['Player'],
+        collision_mask: ['Environment', 'Enemy'],
+        physics_type: '3d',
+      }) as { content: Array<{ text: string }> };
+
+      expect(executeOperation).toHaveBeenCalledTimes(2);
+      // collision_layer: Player = layer 1 = bit 0 = 1
+      expect(executeOperation).toHaveBeenCalledWith(
+        ctx,
+        '/my/project',
+        'modify_node_property',
+        {
+          scenePath: 'scenes/player.tscn',
+          nodePath: 'Player/CollisionShape3D',
+          property: 'collision_layer',
+          value: 1,
+        },
+      );
+      // collision_mask: Environment = layer 2 = bit 1 = 2, Enemy = layer 3 = bit 2 = 4, combined = 6
+      expect(executeOperation).toHaveBeenCalledWith(
+        ctx,
+        '/my/project',
+        'modify_node_property',
+        {
+          scenePath: 'scenes/player.tscn',
+          nodePath: 'Player/CollisionShape3D',
+          property: 'collision_mask',
+          value: 6,
+        },
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.results).toHaveLength(2);
+    });
+
+    it('returns toolError on executeOperation exception', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('file content');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          layer_names: {
+            '3d_physics/layer_1': '"Player"',
+          },
+        },
+        configVersion: 5,
+      });
+      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
+
+      const handler = handlers.get('set_node_collision')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/player.tscn',
+        node_path: '.',
+        collision_layer: ['Player'],
+        physics_type: '3d',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  // ── list_autoloads ───────────────────────────────────────────────────
+
+  describe('list_autoloads', () => {
+    it('registers the list_autoloads tool', () => {
+      expect(handlers.has('list_autoloads')).toBe(true);
+    });
+
+    it('returns toolError when validatePath fails', async () => {
+      vi.mocked(validatePath).mockReturnValue(false);
+
+      const handler = handlers.get('list_autoloads')!;
+      const result = await handler({
+        project_path: '/bad/../path',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError when project.godot missing', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const handler = handlers.get('list_autoloads')!;
+      const result = await handler({
+        project_path: '/not/a/project',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('parses [autoload] section correctly and strips * prefix with enabled status', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('file content');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          autoload: {
+            EventBus: '"*res://scripts/autoloads/event_bus.gd"',
+            GameManager: '"*res://scripts/autoloads/game_manager.gd"',
+          },
+        },
+        configVersion: 5,
+      });
+
+      const handler = handlers.get('list_autoloads')!;
+      const result = await handler({
+        project_path: '/my/project',
+      }) as { content: Array<{ text: string }> };
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.autoloads).toHaveLength(2);
+      expect(parsed.autoloads[0]).toEqual({
+        name: 'EventBus',
+        script_path: 'res://scripts/autoloads/event_bus.gd',
+        enabled: true,
+      });
+      expect(parsed.autoloads[1]).toEqual({
+        name: 'GameManager',
+        script_path: 'res://scripts/autoloads/game_manager.gd',
+        enabled: true,
+      });
+    });
+
+    it('reports disabled status when * prefix is missing', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('file content');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          autoload: {
+            DisabledLoader: '"res://scripts/autoloads/disabled.gd"',
+          },
+        },
+        configVersion: 5,
+      });
+
+      const handler = handlers.get('list_autoloads')!;
+      const result = await handler({
+        project_path: '/my/project',
+      }) as { content: Array<{ text: string }> };
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.autoloads).toHaveLength(1);
+      expect(parsed.autoloads[0]).toEqual({
+        name: 'DisabledLoader',
+        script_path: 'res://scripts/autoloads/disabled.gd',
+        enabled: false,
+      });
+    });
+
+    it('returns empty array when no autoloads section exists', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('file content');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          application: { 'config/name': '"MyGame"' },
+        },
+        configVersion: 5,
+      });
+
+      const handler = handlers.get('list_autoloads')!;
+      const result = await handler({
+        project_path: '/my/project',
+      }) as { content: Array<{ text: string }> };
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.autoloads).toEqual([]);
+    });
+
+    it('returns toolError on readFileSync exception', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockImplementation(() => {
+        throw new Error('Permission denied');
+      });
+
+      const handler = handlers.get('list_autoloads')!;
+      const result = await handler({
+        project_path: '/my/project',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  // ── add_autoload ─────────────────────────────────────────────────────
+
+  describe('add_autoload', () => {
+    it('registers the add_autoload tool', () => {
+      expect(handlers.has('add_autoload')).toBe(true);
+    });
+
+    it('returns toolError when validatePath fails', async () => {
+      vi.mocked(validatePath).mockReturnValue(false);
+
+      const handler = handlers.get('add_autoload')!;
+      const result = await handler({
+        project_path: '/bad/../path',
+        name: 'EventBus',
+        script_path: 'scripts/autoloads/event_bus.gd',
+        enabled: true,
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError when project.godot missing', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const handler = handlers.get('add_autoload')!;
+      const result = await handler({
+        project_path: '/not/a/project',
+        name: 'EventBus',
+        script_path: 'scripts/autoloads/event_bus.gd',
+        enabled: true,
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError when script file not found', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockImplementation((path: unknown) => {
+        const p = path as string;
+        // project.godot exists, but the script file does not
+        if (p.endsWith('project.godot')) return true;
+        return false;
+      });
+
+      const handler = handlers.get('add_autoload')!;
+      const result = await handler({
+        project_path: '/my/project',
+        name: 'EventBus',
+        script_path: 'scripts/autoloads/event_bus.gd',
+        enabled: true,
+      }) as { isError?: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBe(true);
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.error).toContain('Script file not found');
+    });
+
+    it('calls executeOperation with correct *res:// prefix format for enabled autoload', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockImplementation((path: unknown) => {
+        // Both project.godot and script file exist
+        return true;
+      });
+      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+
+      const handler = handlers.get('add_autoload')!;
+      await handler({
+        project_path: '/my/project',
+        name: 'EventBus',
+        script_path: 'scripts/autoloads/event_bus.gd',
+        enabled: true,
+      });
+
+      expect(executeOperation).toHaveBeenCalledWith(
+        ctx,
+        '/my/project',
+        'modify_project_setting',
+        {
+          section: 'autoload',
+          key: 'EventBus',
+          value: '*res://scripts/autoloads/event_bus.gd',
+          action: 'set',
+        },
+      );
+    });
+
+    it('calls executeOperation with res:// prefix (no *) for disabled autoload', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+
+      const handler = handlers.get('add_autoload')!;
+      await handler({
+        project_path: '/my/project',
+        name: 'EventBus',
+        script_path: 'scripts/autoloads/event_bus.gd',
+        enabled: false,
+      });
+
+      expect(executeOperation).toHaveBeenCalledWith(
+        ctx,
+        '/my/project',
+        'modify_project_setting',
+        {
+          section: 'autoload',
+          key: 'EventBus',
+          value: 'res://scripts/autoloads/event_bus.gd',
+          action: 'set',
+        },
+      );
+    });
+
+    it('returns success JSON on successful add', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+
+      const handler = handlers.get('add_autoload')!;
+      const result = await handler({
+        project_path: '/my/project',
+        name: 'EventBus',
+        script_path: 'scripts/autoloads/event_bus.gd',
+        enabled: true,
+      }) as { content: Array<{ text: string }> };
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.name).toBe('EventBus');
+      expect(parsed.script_path).toBe('scripts/autoloads/event_bus.gd');
+      expect(parsed.enabled).toBe(true);
+    });
+
+    it('returns toolError on stderr error', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation).mockResolvedValue({
+        stdout: '',
+        stderr: 'Failed to add autoload',
+      });
+
+      const handler = handlers.get('add_autoload')!;
+      const result = await handler({
+        project_path: '/my/project',
+        name: 'EventBus',
+        script_path: 'scripts/autoloads/event_bus.gd',
+        enabled: true,
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError on executeOperation exception', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
+
+      const handler = handlers.get('add_autoload')!;
+      const result = await handler({
+        project_path: '/my/project',
+        name: 'EventBus',
+        script_path: 'scripts/autoloads/event_bus.gd',
+        enabled: true,
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  // ── remove_autoload ──────────────────────────────────────────────────
+
+  describe('remove_autoload', () => {
+    it('registers the remove_autoload tool', () => {
+      expect(handlers.has('remove_autoload')).toBe(true);
+    });
+
+    it('returns toolError when validatePath fails', async () => {
+      vi.mocked(validatePath).mockReturnValue(false);
+
+      const handler = handlers.get('remove_autoload')!;
+      const result = await handler({
+        project_path: '/bad/../path',
+        name: 'EventBus',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError when project.godot missing', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const handler = handlers.get('remove_autoload')!;
+      const result = await handler({
+        project_path: '/not/a/project',
+        name: 'EventBus',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('calls executeOperation with delete action', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+
+      const handler = handlers.get('remove_autoload')!;
+      await handler({
+        project_path: '/my/project',
+        name: 'EventBus',
+      });
+
+      expect(executeOperation).toHaveBeenCalledWith(
+        ctx,
+        '/my/project',
+        'modify_project_setting',
+        { section: 'autoload', key: 'EventBus', action: 'delete' },
+      );
+    });
+
+    it('returns success JSON on successful removal', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+
+      const handler = handlers.get('remove_autoload')!;
+      const result = await handler({
+        project_path: '/my/project',
+        name: 'EventBus',
+      }) as { content: Array<{ text: string }> };
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.name).toBe('EventBus');
+      expect(parsed.action).toBe('removed');
+    });
+
+    it('returns toolError on stderr error', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation).mockResolvedValue({
+        stdout: '',
+        stderr: 'Failed to remove autoload',
+      });
+
+      const handler = handlers.get('remove_autoload')!;
+      const result = await handler({
+        project_path: '/my/project',
+        name: 'EventBus',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError on executeOperation exception', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
+
+      const handler = handlers.get('remove_autoload')!;
+      const result = await handler({
+        project_path: '/my/project',
+        name: 'EventBus',
       }) as { isError?: boolean };
 
       expect(result.isError).toBe(true);

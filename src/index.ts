@@ -22,6 +22,8 @@ import { registerExportTools } from './tools/export.js';
 import { registerAnimationTools } from './tools/animation.js';
 import { registerTileMapTools } from './tools/tilemap.js';
 import { registerRuntimeTools } from './tools/runtime.js';
+import { registerTestingTools } from './tools/testing.js';
+import { registerScaffoldTools } from './tools/scaffold.js';
 import { registerGodotResources } from './resources/godot-resources.js';
 import { logger, wrapServerWithLogging } from './logger.js';
 
@@ -57,6 +59,9 @@ registerAnimationTools(server, ctx);
 registerTileMapTools(server, ctx);
 // Runtime inspection & hot-reload tools (Phase 8)
 registerRuntimeTools(server, ctx);
+// GUT test runner & scaffolding tools (ballz-inspired)
+registerTestingTools(server, ctx);
+registerScaffoldTools(server, ctx);
 
 // Register MCP resources for @mention context
 registerGodotResources(server, ctx);
