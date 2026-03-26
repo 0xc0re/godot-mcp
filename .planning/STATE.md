@@ -5,7 +5,7 @@ milestone_name: Enhancements
 status: completed
 stopped_at: Completed 08-02-PLAN.md (Phase 8 complete, v2.0 milestone complete)
 last_updated: "2026-03-04T05:55:32.458Z"
-last_activity: 2026-03-04 -- Completed 08-02 restart_project tool and server registration
+last_activity: 2026-03-26 -- Completed quick task 260326-fkr: fix ballz CLAUDE.md documented issues
 progress:
   total_phases: 4
   completed_phases: 4
@@ -114,6 +114,7 @@ None.
 |---|-------------|------|--------|-----------|
 | 1 | add logging so we can see when/what is called | 2026-03-04 | ee560d3 | [1-add-logging-so-we-can-see-when-what-is-c](./quick/1-add-logging-so-we-can-see-when-what-is-c/) |
 | 260325-r64 | fix add_node autoload corruption + export_project stderr detection | 2026-03-26 | 264b60e, c304dad | [260325-r64-fix-documented-godot-mcp-issues-add-node](./quick/260325-r64-fix-documented-godot-mcp-issues-add-node/) |
+| 260326-fkr | fix ballz CLAUDE.md documented issues: tileset headless validation, create_tileset ordering, validate_scene completeness | 2026-03-26 | a3083be | [260326-fkr-fix-ballz-claude-md-documented-issues-ti](./quick/260326-fkr-fix-ballz-claude-md-documented-issues-ti/) |
 | 260326-fkr | headless-aware create_tileset error handling | 2026-03-26 | a3083be | [260326-fkr-fix-ballz-claude-md-documented-issues-ti](./quick/260326-fkr-fix-ballz-claude-md-documented-issues-ti/) |
 
 ## Session Continuity
