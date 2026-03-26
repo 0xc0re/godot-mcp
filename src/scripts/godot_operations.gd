@@ -2411,6 +2411,7 @@ func create_tileset(params):
     var margin_y = int(params.get("margin_y", 0))
     var columns = int(params.get("columns", 0))
     var rows = int(params.get("rows", 0))
+    var is_headless = DisplayServer.get_name() == "headless"
 
     if output_path == "res://" or texture_path == "res://":
         log_error("Missing required parameters: output_path and texture_path")
@@ -2422,8 +2423,11 @@ func create_tileset(params):
     # Load texture
     var texture = load(texture_path) as Texture2D
     if texture == null:
-        log_error("Failed to load texture: " + texture_path)
-        print(JSON.stringify({"success": false, "error": "Failed to load texture: " + texture_path}))
+        var err_msg = "Failed to load texture: " + texture_path
+        if is_headless:
+            err_msg = "Failed to load texture in headless mode: " + texture_path + ". Textures may not load without a display server. Provide explicit 'columns' and 'rows' parameters to skip texture size detection."
+        log_error(err_msg)
+        print(JSON.stringify({"success": false, "error": err_msg}))
         return
 
     # Create TileSet
@@ -2450,8 +2454,11 @@ func create_tileset(params):
     if grid_w <= 0 or grid_h <= 0:
         var tex_size = texture.get_size()
         if tex_size.x <= 0 or tex_size.y <= 0:
-            log_error("Texture has zero size and no columns/rows provided")
-            print(JSON.stringify({"success": false, "error": "Texture has zero size and no columns/rows provided"}))
+            var size_err = "Texture has zero size and no columns/rows provided"
+            if is_headless:
+                size_err = "Texture has zero size in headless mode. Provide explicit 'columns' and 'rows' parameters to bypass texture size detection."
+            log_error(size_err)
+            print(JSON.stringify({"success": false, "error": size_err}))
             return
         # Calculate from texture size accounting for margins and separation
         grid_w = int((tex_size.x - margin_x * 2 + separation_x) / (tile_width + separation_x))
@@ -2484,7 +2491,10 @@ func create_tileset(params):
         print(JSON.stringify({"success": false, "error": "Failed to save tileset: " + str(error)}))
         return
 
-    print(JSON.stringify({"success": true, "path": output_path, "source_id": source_id, "grid_size": {"x": grid_w, "y": grid_h}, "tile_count": grid_w * grid_h}))
+    var result = {"success": true, "path": output_path, "source_id": source_id, "grid_size": {"x": grid_w, "y": grid_h}, "tile_count": grid_w * grid_h}
+    if is_headless:
+        result["warning"] = "Created in headless mode — texture data may be incomplete. Verify tileset visually in editor."
+    print(JSON.stringify(result))
 
 # Paint, fill, or clear cells on a TileMapLayer node in a scene
 func paint_tilemap(params):
