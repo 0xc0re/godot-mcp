@@ -124,7 +124,7 @@ export function registerExportTools(server: McpServer, ctx: ServerContext): void
           fullOutputPath,
         ];
 
-        const { stdout } = await execGodot(ctx.godotPath, args, {
+        const { stdout, stderr } = await execGodot(ctx.godotPath, args, {
           timeout: 180_000,
         });
 
@@ -147,6 +147,24 @@ export function registerExportTools(server: McpServer, ctx: ServerContext): void
             'Check the export preset configuration in the Godot editor',
             'Verify that all required resources are present',
           ]);
+        }
+
+        // Also check stderr -- Godot may emit error strings there
+        // even with exit code 0
+        if (stderr) {
+          const stderrTrimmed = stderr.trim();
+          if (
+            stderrTrimmed.includes('ERROR') ||
+            stderrTrimmed.includes('Cannot open file') ||
+            stderrTrimmed.includes('Failed to') ||
+            stderrTrimmed.includes('Invalid')
+          ) {
+            return toolError(`Export failed (stderr): ${stderrTrimmed}`, [
+              'Check the export preset configuration in the Godot editor',
+              'Verify that all required resources and templates are present',
+              'Use list_export_presets to verify preset configuration',
+            ]);
+          }
         }
 
         return {

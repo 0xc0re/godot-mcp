@@ -351,6 +351,112 @@ describe('Export MCP Tools', () => {
       expect(parsed.mode).toBe('release');
     });
 
+    it('returns toolError when stderr contains "ERROR" even if stdout is clean', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue(SAMPLE_EXPORT_PRESETS);
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          'preset.0': { name: '"Web"', platform: '"Web"', runnable: 'true' },
+          'preset.0.options': {},
+        },
+        configVersion: 0,
+      });
+      vi.mocked(execGodot).mockResolvedValue({
+        stdout: 'Export complete',
+        stderr: 'ERROR: something went wrong with resources',
+      });
+
+      const handler = handlers.get('export_project')!;
+      const result = await handler({
+        project_path: '/my/project',
+        preset_name: 'Web',
+        output_path: 'build/web/index.html',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError when stderr contains "Cannot open file"', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue(SAMPLE_EXPORT_PRESETS);
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          'preset.0': { name: '"Web"', platform: '"Web"', runnable: 'true' },
+          'preset.0.options': {},
+        },
+        configVersion: 0,
+      });
+      vi.mocked(execGodot).mockResolvedValue({
+        stdout: '',
+        stderr: 'Cannot open file: res://missing_resource.png',
+      });
+
+      const handler = handlers.get('export_project')!;
+      const result = await handler({
+        project_path: '/my/project',
+        preset_name: 'Web',
+        output_path: 'build/web/index.html',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError when stderr contains "Failed to"', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue(SAMPLE_EXPORT_PRESETS);
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          'preset.0': { name: '"Web"', platform: '"Web"', runnable: 'true' },
+          'preset.0.options': {},
+        },
+        configVersion: 0,
+      });
+      vi.mocked(execGodot).mockResolvedValue({
+        stdout: '',
+        stderr: 'Failed to load resource',
+      });
+
+      const handler = handlers.get('export_project')!;
+      const result = await handler({
+        project_path: '/my/project',
+        preset_name: 'Web',
+        output_path: 'build/web/index.html',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns success when both stdout and stderr are clean', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue(SAMPLE_EXPORT_PRESETS);
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          'preset.0': { name: '"Web"', platform: '"Web"', runnable: 'true' },
+          'preset.0.options': {},
+        },
+        configVersion: 0,
+      });
+      vi.mocked(execGodot).mockResolvedValue({
+        stdout: 'Export successful',
+        stderr: 'Godot Engine v4.3.stable - https://godotengine.org',
+      });
+
+      const handler = handlers.get('export_project')!;
+      const result = await handler({
+        project_path: '/my/project',
+        preset_name: 'Web',
+        output_path: 'build/web/index.html',
+      }) as { content: Array<{ text: string }>; isError?: boolean };
+
+      expect(result.isError).toBeUndefined();
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.success).toBe(true);
+    });
+
     it('returns toolError on execGodot exception', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
