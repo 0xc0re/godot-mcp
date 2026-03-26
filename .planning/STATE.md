@@ -113,9 +113,10 @@ None.
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 1 | add logging so we can see when/what is called | 2026-03-04 | ee560d3 | [1-add-logging-so-we-can-see-when-what-is-c](./quick/1-add-logging-so-we-can-see-when-what-is-c/) |
+| 260325-r64 | fix add_node autoload corruption + export_project stderr detection | 2026-03-26 | 264b60e, c304dad | [260325-r64-fix-documented-godot-mcp-issues-add-node](./quick/260325-r64-fix-documented-godot-mcp-issues-add-node/) |
 
 ## Session Continuity
 
-Last session: 2026-03-04T19:55:53Z
-Stopped at: Completed quick task 1 (add logging/observability)
+Last session: 2026-03-26T00:41:00Z
+Stopped at: Completed quick task 260325-r64 (fix add_node + export_project)
 Resume file: None
