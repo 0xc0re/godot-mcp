@@ -6,11 +6,12 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { join } from 'path';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import type { ServerContext } from '../types.js';
 import { executeOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 import { parseScene } from '../parsers/tscn-parser.js';
+import { addNodeToScene } from '../parsers/tscn-writer.js';
 
 export function registerSceneTools(server: McpServer, ctx: ServerContext): void {
   // Tool 8: create_scene
@@ -139,48 +140,31 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ]);
         }
 
-        const params: Record<string, unknown> = {
-          scenePath: scene_path,
+        // TypeScript-native .tscn manipulation -- avoids GDScript execution
+        // so scenes with autoload-referencing scripts are never corrupted.
+        const content = readFileSync(scenePath, 'utf-8');
+        const newContent = addNodeToScene(content, {
+          parentNodePath: parent_node_path,
           nodeType: node_type,
           nodeName: node_name,
-        };
-
-        if (parent_node_path) {
-          params.parentNodePath = parent_node_path;
-        }
-        if (properties) {
-          params.properties = properties;
-        }
-
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path,
-          'add_node',
-          params,
-        );
-
-        if (stderr && stderr.includes('Failed to')) {
-          return toolError(`Failed to add node: ${stderr}`, [
-            'Check if the node type is valid',
-            'Ensure the parent node path exists',
-            'Verify the scene file is valid',
-          ]);
-        }
+          properties,
+        });
+        writeFileSync(scenePath, newContent, 'utf-8');
 
         return {
           content: [
             {
               type: 'text' as const,
-              text: `Node '${node_name}' of type '${node_type}' added successfully to '${scene_path}'.\n\nOutput: ${stdout}`,
+              text: `Node '${node_name}' of type '${node_type}' added successfully to '${scene_path}'.`,
             },
           ],
         };
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         return toolError(`Failed to add node: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
+          'Ensure the scene file is a valid .tscn file',
+          'Check that the node type and name are valid',
+          'Verify the scene file is not corrupted',
         ]);
       }
     },

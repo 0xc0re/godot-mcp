@@ -1,0 +1,213 @@
+/**
+ * Tests for tscn-writer: TypeScript-native .tscn text manipulation.
+ *
+ * addNodeToScene appends a [node] section to .tscn content without
+ * GDScript execution, avoiding autoload-related scene corruption.
+ */
+
+import { describe, it, expect } from 'vitest';
+import { addNodeToScene } from '../src/parsers/tscn-writer.js';
+
+// Minimal valid .tscn scene with root node
+const MINIMAL_SCENE = `[gd_scene load_steps=2 format=3 uid="uid://abc123"]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_abc"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_abc")
+`;
+
+// Scene with connections at the end
+const SCENE_WITH_CONNECTIONS = `[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_abc"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_abc")
+
+[node name="Button" type="Button" parent="."]
+
+[connection signal="pressed" from="Button" to="." method="_on_button_pressed"]
+`;
+
+// Scene with autoload-referencing scripts (the problematic case)
+const SCENE_WITH_AUTOLOADS = `[gd_scene load_steps=3 format=3 uid="uid://xyz"]
+
+[ext_resource type="Script" path="res://scripts/player.gd" id="1_p"]
+[ext_resource type="PackedScene" path="res://scenes/weapon.tscn" id="2_w"]
+
+[node name="Player" type="CharacterBody2D"]
+script = ExtResource("1_p")
+speed = 200.0
+
+[node name="Sprite" type="Sprite2D" parent="."]
+
+[node name="CollisionShape" type="CollisionShape2D" parent="."]
+`;
+
+describe('tscn-writer', () => {
+  describe('addNodeToScene', () => {
+    it('adds a child node with correct parent="."', () => {
+      const result = addNodeToScene(MINIMAL_SCENE, {
+        nodeType: 'Sprite2D',
+        nodeName: 'MySprite',
+      });
+
+      expect(result).toContain('[node name="MySprite" type="Sprite2D" parent="."]');
+    });
+
+    it('uses parent="." when parentNodePath is "root"', () => {
+      const result = addNodeToScene(MINIMAL_SCENE, {
+        parentNodePath: 'root',
+        nodeType: 'Camera2D',
+        nodeName: 'MainCamera',
+      });
+
+      expect(result).toContain('[node name="MainCamera" type="Camera2D" parent="."]');
+    });
+
+    it('maps "root/Player" to parent="Player"', () => {
+      const result = addNodeToScene(MINIMAL_SCENE, {
+        parentNodePath: 'root/Player',
+        nodeType: 'Sprite2D',
+        nodeName: 'PlayerSprite',
+      });
+
+      expect(result).toContain('[node name="PlayerSprite" type="Sprite2D" parent="Player"]');
+    });
+
+    it('maps "root/Player/Body" to parent="Player/Body"', () => {
+      const result = addNodeToScene(MINIMAL_SCENE, {
+        parentNodePath: 'root/Player/Body',
+        nodeType: 'CollisionShape2D',
+        nodeName: 'Shape',
+      });
+
+      expect(result).toContain('[node name="Shape" type="CollisionShape2D" parent="Player/Body"]');
+    });
+
+    it('preserves all existing ext_resources, nodes, and properties', () => {
+      const result = addNodeToScene(MINIMAL_SCENE, {
+        nodeType: 'Label',
+        nodeName: 'InfoLabel',
+      });
+
+      // All original content must still be present
+      expect(result).toContain('[gd_scene load_steps=2 format=3 uid="uid://abc123"]');
+      expect(result).toContain('[ext_resource type="Script" path="res://scripts/main.gd" id="1_abc"]');
+      expect(result).toContain('[node name="Main" type="Node2D"]');
+      expect(result).toContain('script = ExtResource("1_abc")');
+      // New node also present
+      expect(result).toContain('[node name="InfoLabel" type="Label" parent="."]');
+    });
+
+    it('places new node before [connection] sections', () => {
+      const result = addNodeToScene(SCENE_WITH_CONNECTIONS, {
+        nodeType: 'Label',
+        nodeName: 'StatusLabel',
+      });
+
+      const nodeIdx = result.indexOf('[node name="StatusLabel"');
+      const connIdx = result.indexOf('[connection');
+      expect(nodeIdx).toBeGreaterThan(-1);
+      expect(connIdx).toBeGreaterThan(-1);
+      expect(nodeIdx).toBeLessThan(connIdx);
+    });
+
+    it('serializes Vector2 properties correctly', () => {
+      const result = addNodeToScene(MINIMAL_SCENE, {
+        nodeType: 'Sprite2D',
+        nodeName: 'Positioned',
+        properties: {
+          position: { x: 100, y: 200 },
+        },
+      });
+
+      expect(result).toContain('position = Vector2(100, 200)');
+    });
+
+    it('serializes Vector3 properties correctly', () => {
+      const result = addNodeToScene(MINIMAL_SCENE, {
+        nodeType: 'Node3D',
+        nodeName: 'Box',
+        properties: {
+          position: { x: 1, y: 2, z: 3 },
+        },
+      });
+
+      expect(result).toContain('position = Vector3(1, 2, 3)');
+    });
+
+    it('serializes Color properties correctly', () => {
+      const result = addNodeToScene(MINIMAL_SCENE, {
+        nodeType: 'Label',
+        nodeName: 'ColorLabel',
+        properties: {
+          modulate: { r: 1, g: 0, b: 0, a: 1 },
+        },
+      });
+
+      expect(result).toContain('modulate = Color(1, 0, 0, 1)');
+    });
+
+    it('serializes boolean properties correctly', () => {
+      const result = addNodeToScene(MINIMAL_SCENE, {
+        nodeType: 'Sprite2D',
+        nodeName: 'Hidden',
+        properties: {
+          visible: false,
+        },
+      });
+
+      expect(result).toContain('visible = false');
+    });
+
+    it('serializes number properties correctly', () => {
+      const result = addNodeToScene(MINIMAL_SCENE, {
+        nodeType: 'Sprite2D',
+        nodeName: 'Scaled',
+        properties: {
+          z_index: 5,
+        },
+      });
+
+      expect(result).toContain('z_index = 5');
+    });
+
+    it('serializes string properties with quotes', () => {
+      const result = addNodeToScene(MINIMAL_SCENE, {
+        nodeType: 'Label',
+        nodeName: 'Greeting',
+        properties: {
+          text: 'Hello World',
+        },
+      });
+
+      expect(result).toContain('text = "Hello World"');
+    });
+
+    it('preserves autoload-referencing scripts untouched', () => {
+      const result = addNodeToScene(SCENE_WITH_AUTOLOADS, {
+        nodeType: 'Area2D',
+        nodeName: 'HitBox',
+      });
+
+      // All original content preserved exactly
+      expect(result).toContain('script = ExtResource("1_p")');
+      expect(result).toContain('speed = 200.0');
+      expect(result).toContain('[ext_resource type="Script" path="res://scripts/player.gd" id="1_p"]');
+      expect(result).toContain('[ext_resource type="PackedScene" path="res://scenes/weapon.tscn" id="2_w"]');
+      // New node added
+      expect(result).toContain('[node name="HitBox" type="Area2D" parent="."]');
+    });
+
+    it('throws on invalid .tscn content', () => {
+      expect(() => {
+        addNodeToScene('not a valid scene file', {
+          nodeType: 'Node2D',
+          nodeName: 'Test',
+        });
+      }).toThrow();
+    });
+  });
+});

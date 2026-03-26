@@ -1,5 +1,5 @@
 /**
- * Tests for scene MCP tools: read_scene, modify_node_property, remove_node, attach_script.
+ * Tests for scene MCP tools: read_scene, add_node, modify_node_property, remove_node, attach_script.
  *
  * Uses vi.mock() to isolate tool logic from filesystem and Godot process.
  */
@@ -16,6 +16,7 @@ vi.mock('fs', async () => {
     ...actual,
     existsSync: vi.fn(),
     readFileSync: vi.fn(),
+    writeFileSync: vi.fn(),
   };
 });
 
@@ -30,6 +31,11 @@ vi.mock('../src/parsers/tscn-parser.js', () => ({
   parseScene: vi.fn(),
 }));
 
+// Mock tscn-writer module
+vi.mock('../src/parsers/tscn-writer.js', () => ({
+  addNodeToScene: vi.fn(),
+}));
+
 // Mock errors module
 vi.mock('../src/errors.js', () => ({
   toolError: vi.fn((message: string, suggestions: string[] = []) => ({
@@ -38,9 +44,10 @@ vi.mock('../src/errors.js', () => ({
   })),
 }));
 
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { validatePath, executeOperation } from '../src/godot.js';
 import { parseScene } from '../src/parsers/tscn-parser.js';
+import { addNodeToScene } from '../src/parsers/tscn-writer.js';
 import { toolError } from '../src/errors.js';
 
 // Helper to extract registered tool handlers from McpServer
@@ -66,6 +73,12 @@ function createTestContext(): ServerContext {
     validatedPaths: new Map(),
   };
 }
+
+// Minimal .tscn content for add_node tests
+const MINIMAL_TSCN = `[gd_scene format=3]
+
+[node name="Main" type="Node2D"]
+`;
 
 describe('Scene MCP Tools', () => {
   let server: McpServer;
@@ -133,6 +146,120 @@ describe('Scene MCP Tools', () => {
       const result = await handler({
         project_path: '/not/a/project',
         scene_path: 'scenes/main.tscn',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe('add_node', () => {
+    it('registers the add_node tool', () => {
+      expect(handlers.has('add_node')).toBe(true);
+    });
+
+    it('reads .tscn from disk, calls addNodeToScene, writes result back', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue(MINIMAL_TSCN);
+      const updatedContent = MINIMAL_TSCN + '\n[node name="NewNode" type="Sprite2D" parent="."]\n';
+      vi.mocked(addNodeToScene).mockReturnValue(updatedContent);
+
+      const handler = handlers.get('add_node')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/main.tscn',
+        node_type: 'Sprite2D',
+        node_name: 'NewNode',
+      }) as { content: Array<{ type: string; text: string }>; isError?: boolean };
+
+      // Should read the .tscn file
+      expect(readFileSync).toHaveBeenCalledWith('/my/project/scenes/main.tscn', 'utf-8');
+      // Should call addNodeToScene with the content and options
+      expect(addNodeToScene).toHaveBeenCalledWith(MINIMAL_TSCN, {
+        parentNodePath: undefined,
+        nodeType: 'Sprite2D',
+        nodeName: 'NewNode',
+        properties: undefined,
+      });
+      // Should write the result back to disk
+      expect(writeFileSync).toHaveBeenCalledWith('/my/project/scenes/main.tscn', updatedContent, 'utf-8');
+      // Should NOT call executeOperation
+      expect(executeOperation).not.toHaveBeenCalled();
+      // Should return success
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toContain('NewNode');
+    });
+
+    it('returns success with properties passed to addNodeToScene', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue(MINIMAL_TSCN);
+      vi.mocked(addNodeToScene).mockReturnValue(MINIMAL_TSCN + '\n[node name="Pos" type="Sprite2D" parent="."]\nposition = Vector2(10, 20)\n');
+
+      const handler = handlers.get('add_node')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/main.tscn',
+        node_type: 'Sprite2D',
+        node_name: 'Pos',
+        properties: { position: { x: 10, y: 20 } },
+      }) as { isError?: boolean };
+
+      expect(addNodeToScene).toHaveBeenCalledWith(MINIMAL_TSCN, {
+        parentNodePath: undefined,
+        nodeType: 'Sprite2D',
+        nodeName: 'Pos',
+        properties: { position: { x: 10, y: 20 } },
+      });
+      expect(result.isError).toBeUndefined();
+    });
+
+    it('returns toolError when scene file does not exist', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockImplementation((p) => {
+        if (String(p).endsWith('project.godot')) return true;
+        return false; // scene file doesn't exist
+      });
+
+      const handler = handlers.get('add_node')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/missing.tscn',
+        node_type: 'Sprite2D',
+        node_name: 'Test',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError for invalid paths', async () => {
+      vi.mocked(validatePath).mockReturnValue(false);
+
+      const handler = handlers.get('add_node')!;
+      const result = await handler({
+        project_path: '/bad/../path',
+        scene_path: 'scenes/main.tscn',
+        node_type: 'Sprite2D',
+        node_name: 'Test',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError when addNodeToScene throws', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('invalid content');
+      vi.mocked(addNodeToScene).mockImplementation(() => {
+        throw new Error('Invalid .tscn content: missing [gd_scene] header');
+      });
+
+      const handler = handlers.get('add_node')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/main.tscn',
+        node_type: 'Sprite2D',
+        node_name: 'Test',
       }) as { isError?: boolean };
 
       expect(result.isError).toBe(true);
