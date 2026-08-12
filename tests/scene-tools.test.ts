@@ -24,6 +24,7 @@ vi.mock('fs', async () => {
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
   executeOperation: vi.fn(),
+  runOperation: vi.fn(),
 }));
 
 // Mock tscn-parser module
@@ -45,7 +46,7 @@ vi.mock('../src/errors.js', () => ({
 }));
 
 import { existsSync, readFileSync, writeFileSync } from 'fs';
-import { validatePath, executeOperation } from '../src/godot.js';
+import { validatePath, executeOperation, runOperation } from '../src/godot.js';
 import { parseScene } from '../src/parsers/tscn-parser.js';
 import { addNodeToScene } from '../src/parsers/tscn-writer.js';
 import { toolError } from '../src/errors.js';
@@ -183,8 +184,9 @@ describe('Scene MCP Tools', () => {
       });
       // Should write the result back to disk
       expect(writeFileSync).toHaveBeenCalledWith('/my/project/scenes/main.tscn', updatedContent, 'utf-8');
-      // Should NOT call executeOperation
+      // Should NOT call executeOperation or runOperation
       expect(executeOperation).not.toHaveBeenCalled();
+      expect(runOperation).not.toHaveBeenCalled();
       // Should return success
       expect(result.isError).toBeUndefined();
       expect(result.content[0].text).toContain('NewNode');
@@ -266,15 +268,310 @@ describe('Scene MCP Tools', () => {
     });
   });
 
+  describe('create_scene', () => {
+    it('registers the create_scene tool', () => {
+      expect(handlers.has('create_scene')).toBe(true);
+    });
+
+    it('passes correct params to runOperation and returns success', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, scene_path: 'scenes/new.tscn', root_node_type: 'Node2D' },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
+
+      const handler = handlers.get('create_scene')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/new.tscn',
+        root_node_type: 'Node2D',
+      }) as { content: Array<{ type: string; text: string }>; isError?: boolean };
+
+      expect(runOperation).toHaveBeenCalledWith(
+        ctx,
+        '/my/project',
+        'create_scene',
+        expect.objectContaining({ scenePath: 'scenes/new.tscn', rootNodeType: 'Node2D' }),
+      );
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toContain('scenes/new.tscn');
+    });
+
+    it('returns toolError when runOperation yields ok:false', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Failed to instantiate node of type: BogusType',
+        stdout: '',
+        stderr: '',
+        exitCode: 1,
+      });
+
+      const handler = handlers.get('create_scene')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/new.tscn',
+        root_node_type: 'BogusType',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to instantiate node of type: BogusType'),
+        expect.any(Array),
+      );
+    });
+
+    it('returns toolError for invalid paths', async () => {
+      vi.mocked(validatePath).mockReturnValue(false);
+
+      const handler = handlers.get('create_scene')!;
+      const result = await handler({
+        project_path: '/bad/../path',
+        scene_path: 'scenes/new.tscn',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe('load_sprite', () => {
+    it('registers the load_sprite tool', () => {
+      expect(handlers.has('load_sprite')).toBe(true);
+    });
+
+    it('passes correct params to runOperation and returns success', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, node_path: 'root/Sprite2D', texture_path: 'res://sprite.png' },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
+
+      const handler = handlers.get('load_sprite')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/main.tscn',
+        node_path: 'root/Sprite2D',
+        texture_path: 'sprite.png',
+      }) as { content: Array<{ type: string; text: string }>; isError?: boolean };
+
+      expect(runOperation).toHaveBeenCalledWith(
+        ctx,
+        '/my/project',
+        'load_sprite',
+        expect.objectContaining({
+          scenePath: 'scenes/main.tscn',
+          nodePath: 'root/Sprite2D',
+          texturePath: 'sprite.png',
+        }),
+      );
+      expect(result.isError).toBeUndefined();
+    });
+
+    it('returns toolError when runOperation yields ok:false', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Node not found: root/Sprite2D',
+        stdout: '',
+        stderr: '',
+        exitCode: 1,
+      });
+
+      const handler = handlers.get('load_sprite')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/main.tscn',
+        node_path: 'root/Sprite2D',
+        texture_path: 'sprite.png',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Node not found: root/Sprite2D'),
+        expect.any(Array),
+      );
+    });
+
+    it('returns toolError for invalid paths', async () => {
+      vi.mocked(validatePath).mockReturnValue(false);
+
+      const handler = handlers.get('load_sprite')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/main.tscn',
+        node_path: 'root/../etc',
+        texture_path: 'sprite.png',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe('export_mesh_library', () => {
+    it('registers the export_mesh_library tool', () => {
+      expect(handlers.has('export_mesh_library')).toBe(true);
+    });
+
+    it('passes correct params to runOperation and returns success', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, output_path: 'res://meshes.res', item_count: 3 },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
+
+      const handler = handlers.get('export_mesh_library')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/meshes.tscn',
+        output_path: 'meshes.res',
+      }) as { content: Array<{ type: string; text: string }>; isError?: boolean };
+
+      expect(runOperation).toHaveBeenCalledWith(
+        ctx,
+        '/my/project',
+        'export_mesh_library',
+        expect.objectContaining({ scenePath: 'scenes/meshes.tscn', outputPath: 'meshes.res' }),
+      );
+      expect(result.isError).toBeUndefined();
+    });
+
+    it('returns toolError when runOperation yields ok:false', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Scene contains no MeshInstance3D nodes',
+        stdout: '',
+        stderr: '',
+        exitCode: 1,
+      });
+
+      const handler = handlers.get('export_mesh_library')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/meshes.tscn',
+        output_path: 'meshes.res',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Scene contains no MeshInstance3D nodes'),
+        expect.any(Array),
+      );
+    });
+
+    it('returns toolError for invalid paths', async () => {
+      vi.mocked(validatePath).mockReturnValue(false);
+
+      const handler = handlers.get('export_mesh_library')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/../../etc/passwd',
+        output_path: 'meshes.res',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe('save_scene', () => {
+    it('registers the save_scene tool', () => {
+      expect(handlers.has('save_scene')).toBe(true);
+    });
+
+    it('passes correct params to runOperation and returns success', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, scene_path: 'scenes/main.tscn' },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
+
+      const handler = handlers.get('save_scene')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/main.tscn',
+      }) as { content: Array<{ type: string; text: string }>; isError?: boolean };
+
+      expect(runOperation).toHaveBeenCalledWith(
+        ctx,
+        '/my/project',
+        'save_scene',
+        expect.objectContaining({ scenePath: 'scenes/main.tscn' }),
+      );
+      expect(result.isError).toBeUndefined();
+    });
+
+    it('returns toolError when runOperation yields ok:false', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Failed to save scene: 12',
+        stdout: '',
+        stderr: '',
+        exitCode: 1,
+      });
+
+      const handler = handlers.get('save_scene')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/main.tscn',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to save scene: 12'),
+        expect.any(Array),
+      );
+    });
+
+    it('returns toolError for invalid new_path', async () => {
+      vi.mocked(validatePath).mockImplementation((p) => !String(p).includes('..'));
+
+      const handler = handlers.get('save_scene')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/main.tscn',
+        new_path: '../../etc/passwd',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+  });
+
   describe('modify_node_property', () => {
     it('registers the modify_node_property tool', () => {
       expect(handlers.has('modify_node_property')).toBe(true);
     });
 
-    it('passes correct params to executeOperation', async () => {
+    it('passes correct params to runOperation', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, node: 'root/Player', property: 'position', value: '(100, 200)' },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('modify_node_property')!;
       await handler({
@@ -286,7 +583,7 @@ describe('Scene MCP Tools', () => {
         value_type: 'Vector2',
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'modify_node_property',
@@ -297,6 +594,34 @@ describe('Scene MCP Tools', () => {
           value: { x: 100, y: 200 },
           valueType: 'Vector2',
         }),
+      );
+    });
+
+    it('returns toolError when runOperation yields ok:false', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Node not found: root/Player',
+        stdout: '',
+        stderr: '',
+        exitCode: 1,
+      });
+
+      const handler = handlers.get('modify_node_property')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/main.tscn',
+        node_path: 'root/Player',
+        property_name: 'position',
+        value: { x: 100, y: 200 },
+        value_type: 'Vector2',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Node not found: root/Player'),
+        expect.any(Array),
       );
     });
 
@@ -321,10 +646,16 @@ describe('Scene MCP Tools', () => {
       expect(handlers.has('remove_node')).toBe(true);
     });
 
-    it('passes correct params to executeOperation', async () => {
+    it('passes correct params to runOperation', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, removed: 'root/EnemySpawner' },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('remove_node')!;
       await handler({
@@ -333,7 +664,7 @@ describe('Scene MCP Tools', () => {
         node_path: 'root/EnemySpawner',
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'remove_node',
@@ -341,6 +672,31 @@ describe('Scene MCP Tools', () => {
           scenePath: 'scenes/main.tscn',
           nodePath: 'root/EnemySpawner',
         }),
+      );
+    });
+
+    it('returns toolError when runOperation yields ok:false', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Cannot remove the root node',
+        stdout: '',
+        stderr: '',
+        exitCode: 1,
+      });
+
+      const handler = handlers.get('remove_node')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/main.tscn',
+        node_path: 'root',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Cannot remove the root node'),
+        expect.any(Array),
       );
     });
 
@@ -364,10 +720,16 @@ describe('Scene MCP Tools', () => {
       expect(handlers.has('attach_script')).toBe(true);
     });
 
-    it('passes correct params to executeOperation', async () => {
+    it('passes correct params to runOperation', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, node: 'root/Player', script: 'scripts/player.gd' },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('attach_script')!;
       await handler({
@@ -377,7 +739,7 @@ describe('Scene MCP Tools', () => {
         script_path: 'scripts/player.gd',
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'attach_script',
@@ -386,6 +748,32 @@ describe('Scene MCP Tools', () => {
           nodePath: 'root/Player',
           scriptPath: 'scripts/player.gd',
         }),
+      );
+    });
+
+    it('returns toolError when runOperation yields ok:false', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Failed to load script: res://scripts/player.gd',
+        stdout: '',
+        stderr: '',
+        exitCode: 1,
+      });
+
+      const handler = handlers.get('attach_script')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/main.tscn',
+        node_path: 'root/Player',
+        script_path: 'scripts/player.gd',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to load script: res://scripts/player.gd'),
+        expect.any(Array),
       );
     });
 

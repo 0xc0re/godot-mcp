@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { join } from 'path';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { executeOperation, validatePath } from '../godot.js';
+import { runOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 import { parseScene } from '../parsers/tscn-parser.js';
 import { addNodeToScene } from '../parsers/tscn-writer.js';
@@ -52,15 +52,10 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           rootNodeType: root_node_type || 'Node2D',
         };
 
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path,
-          'create_scene',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'create_scene', params);
 
-        if (stderr && stderr.includes('Failed to')) {
-          return toolError(`Failed to create scene: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to create scene: ${result.error}`, [
             'Check if the root node type is valid',
             'Ensure you have write permissions to the scene path',
             'Verify the scene path is valid',
@@ -71,7 +66,7 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           content: [
             {
               type: 'text' as const,
-              text: `Scene created successfully at: ${scene_path}\n\nOutput: ${stdout}`,
+              text: `Scene created successfully at: ${scene_path}\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };
@@ -230,15 +225,10 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           texturePath: texture_path,
         };
 
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path,
-          'load_sprite',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'load_sprite', params);
 
-        if (stderr && stderr.includes('Failed to')) {
-          return toolError(`Failed to load sprite: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to load sprite: ${result.error}`, [
             'Check if the node path is correct',
             'Ensure the node is a Sprite2D, Sprite3D, or TextureRect',
             'Verify the texture file is a valid image format',
@@ -249,7 +239,7 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           content: [
             {
               type: 'text' as const,
-              text: `Sprite loaded successfully with texture: ${texture_path}\n\nOutput: ${stdout}`,
+              text: `Sprite loaded successfully with texture: ${texture_path}\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };
@@ -321,15 +311,10 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           params.meshItemNames = mesh_item_names;
         }
 
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path,
-          'export_mesh_library',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'export_mesh_library', params);
 
-        if (stderr && stderr.includes('Failed to')) {
-          return toolError(`Failed to export mesh library: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to export mesh library: ${result.error}`, [
             'Check if the scene contains valid 3D meshes',
             'Ensure the output path is valid',
             'Verify the scene file is valid',
@@ -340,7 +325,7 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           content: [
             {
               type: 'text' as const,
-              text: `MeshLibrary exported successfully to: ${output_path}\n\nOutput: ${stdout}`,
+              text: `MeshLibrary exported successfully to: ${output_path}\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };
@@ -410,15 +395,10 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           params.newPath = new_path;
         }
 
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path,
-          'save_scene',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'save_scene', params);
 
-        if (stderr && stderr.includes('Failed to')) {
-          return toolError(`Failed to save scene: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to save scene: ${result.error}`, [
             'Check if the scene file is valid',
             'Ensure you have write permissions to the output path',
             'Verify the scene can be properly packed',
@@ -430,7 +410,7 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           content: [
             {
               type: 'text' as const,
-              text: `Scene saved successfully to: ${savePath}\n\nOutput: ${stdout}`,
+              text: `Scene saved successfully to: ${savePath}\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };
@@ -582,15 +562,10 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           valueType: value_type || '',
         };
 
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path,
-          'modify_node_property',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'modify_node_property', params);
 
-        if (stderr && stderr.includes('Failed to')) {
-          return toolError(`Failed to modify node property: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to modify node property: ${result.error}`, [
             'Check if the node path exists in the scene',
             'Verify the property name is valid for this node type',
             'Ensure the value type matches the property type',
@@ -601,7 +576,7 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           content: [
             {
               type: 'text' as const,
-              text: `Property '${property_name}' modified on node '${node_path}'\n\nOutput: ${stdout}`,
+              text: `Property '${property_name}' modified on node '${node_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };
@@ -664,15 +639,10 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           nodePath: node_path,
         };
 
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path,
-          'remove_node',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'remove_node', params);
 
-        if (stderr && stderr.includes('Failed to')) {
-          return toolError(`Failed to remove node: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to remove node: ${result.error}`, [
             'Check if the node path exists in the scene',
             'The root node cannot be removed',
             'Verify the scene file is valid',
@@ -683,7 +653,7 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           content: [
             {
               type: 'text' as const,
-              text: `Node '${node_path}' removed successfully\n\nOutput: ${stdout}`,
+              text: `Node '${node_path}' removed successfully\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };
@@ -754,15 +724,10 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           scriptPath: script_path,
         };
 
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path,
-          'attach_script',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'attach_script', params);
 
-        if (stderr && stderr.includes('Failed to')) {
-          return toolError(`Failed to attach script: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to attach script: ${result.error}`, [
             'Check if the node path exists in the scene',
             'Ensure the script file exists and is valid GDScript',
             'Verify the script path is correct',
@@ -773,7 +738,7 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           content: [
             {
               type: 'text' as const,
-              text: `Script '${script_path}' attached to node '${node_path}'\n\nOutput: ${stdout}`,
+              text: `Script '${script_path}' attached to node '${node_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };
