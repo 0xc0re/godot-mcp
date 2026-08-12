@@ -73,14 +73,19 @@ export function resolveWithinProject(projectRoot: string, relPath: string): stri
 
   const strippedRelPath = relPath.startsWith('res://') ? relPath.slice('res://'.length) : relPath;
 
-  const candidate = resolve(projectRoot, strippedRelPath);
-
+  // Realpath the root FIRST, then resolve the candidate against that realpathed root.
+  // Resolving against the raw (possibly symlinked) projectRoot would make the initial
+  // containment check compare a realpathed root against a non-realpathed candidate --
+  // spuriously rejecting legitimate in-project paths whenever an ancestor of projectRoot
+  // (not projectRoot's contents, but the root itself) is reached via a symlink.
   let realRoot: string;
   try {
     realRoot = realpathSync(projectRoot);
   } catch {
     realRoot = resolve(projectRoot);
   }
+
+  const candidate = resolve(realRoot, strippedRelPath);
 
   if (!isWithinRoot(realRoot, candidate)) {
     return null;
@@ -114,11 +119,13 @@ export function resolveWithinProject(projectRoot: string, relPath: string): stri
     if (!isWithinRoot(realRoot, realAncestor)) {
       return null;
     }
+    // Rebuild the result against the realpathed ancestor so both the "exists" and
+    // "doesn't exist yet" branches consistently return a realpathed-base path.
+    const remainder = relative(ancestor, candidate);
+    return resolve(realAncestor, remainder);
   } catch {
     return null;
   }
-
-  return candidate;
 }
 
 /**

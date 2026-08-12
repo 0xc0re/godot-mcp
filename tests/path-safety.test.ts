@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { resolveWithinProject } from '../src/godot.js';
@@ -69,6 +69,38 @@ describe('resolveWithinProject', () => {
   it('resolves the root itself', () => {
     const result = resolveWithinProject(root, '.');
     expect(result).toBe(root);
+  });
+
+  describe('when projectRoot itself is reached through a symlink', () => {
+    let realDir: string;
+    let symlinkRoot: string;
+
+    beforeEach(() => {
+      realDir = mkdtempSync(join(tmpdir(), 'godot-mcp-real-'));
+      symlinkRoot = join(tmpdir(), `godot-mcp-symlink-root-${process.pid}-${Date.now()}`);
+      symlinkSync(realDir, symlinkRoot);
+    });
+
+    afterEach(() => {
+      rmSync(symlinkRoot, { force: true });
+      rmSync(realDir, { recursive: true, force: true });
+    });
+
+    it('resolves an existing in-project file without spuriously rejecting it', () => {
+      writeFileSync(join(realDir, 'scene.tscn'), 'content');
+      const result = resolveWithinProject(symlinkRoot, 'scene.tscn');
+      expect(result).toBe(join(realpathSync(realDir), 'scene.tscn'));
+    });
+
+    it('resolves a not-yet-existing output path without spuriously rejecting it', () => {
+      const result = resolveWithinProject(symlinkRoot, 'output/new_file.tres');
+      expect(result).toBe(join(realpathSync(realDir), 'output', 'new_file.tres'));
+    });
+
+    it('still rejects a ".." escape reached through the symlinked root', () => {
+      const result = resolveWithinProject(symlinkRoot, '../etc/passwd');
+      expect(result).toBeNull();
+    });
   });
 });
 
