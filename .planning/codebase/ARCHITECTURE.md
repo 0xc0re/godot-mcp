@@ -4,205 +4,185 @@
 
 ## Pattern Overview
 
-**Overall:** Monolithic MCP Server with External Process Control
-
-The codebase follows a **single-class server pattern** where a centralized `GodotServer` class manages all interactions between the Model Context Protocol (MCP) and the Godot game engine. The server acts as a middleware that translates MCP tool calls into Godot operations by executing headless Godot processes with custom GDScript operations.
+**Overall:** MCP Server with dual-execution bridge pattern
 
 **Key Characteristics:**
-- Single-file monolithic TypeScript server (`src/index.ts`)
-- Request/response middleware pattern for MCP protocol
-- Subprocess management for spawning Godot headless processes
-- State management through instance variables (active process, validated paths, Godot path)
-- Parameter transformation layer (camelCase ↔ snake_case conversion)
+- An MCP (Model Context Protocol) server exposing Godot engine capabilities as LLM-callable tools
+- Two execution paths: TypeScript parsers for fast read-only operations (~1ms), headless GDScript subprocess for write/engine operations (~200ms+)
+- Shared `ServerContext` object injected into every tool domain at startup, carrying process handles and the Godot executable path
+- Tool domains are organized by Godot concept (editor, scene, script, project, etc.) and registered onto a single `McpServer` instance
 
 ## Layers
 
-**MCP Protocol Layer:**
-- Purpose: Handle incoming tool requests from Claude/Cline and format responses according to MCP specification
-- Location: `src/index.ts` (lines 656-958)
-- Contains: Tool handler registration, request routing, error formatting
-- Depends on: @modelcontextprotocol/sdk
-- Used by: External MCP clients (Claude, Cline, etc.)
+**Entry Point / Bootstrap:**
+- Purpose: Creates the MCP server, initializes shared context, registers all tool domains, and connects stdio transport
+- Location: `src/index.ts`
+- Contains: Server instantiation, tool registration calls, signal handler registration, transport connection
+- Depends on: `src/server.ts`, all `src/tools/*.ts` modules, `src/resources/godot-resources.ts`
+- Used by: Node.js runtime (invoked as CLI binary)
 
-**Server Configuration Layer:**
-- Purpose: Manage Godot executable path detection, validation, and caching
-- Location: `src/index.ts` (lines 224-356)
-- Contains: Path validation logic, platform-specific path detection, path caching
-- Depends on: Node.js fs, child_process, path modules
-- Used by: ExecutionLayer
+**Server Context:**
+- Purpose: Detects Godot executable path and constructs the shared `ServerContext` passed to all tools
+- Location: `src/server.ts`
+- Contains: `createServerContext()` factory function
+- Depends on: `src/godot.ts` (path detection), `src/types.ts`
+- Used by: `src/index.ts`
 
-**Execution Layer:**
-- Purpose: Execute Godot operations by spawning headless processes and managing their lifecycle
-- Location: `src/index.ts` (lines 474-533)
-- Contains: Parameter conversion, argument building, process spawning via execFile
-- Depends on: Child_process.execFile (security-hardened against shell injection)
-- Used by: Tool handler methods
+**Type Definitions:**
+- Purpose: Central TypeScript interfaces shared across all modules
+- Location: `src/types.ts`
+- Contains: `ServerContext`, `GodotProcess`, `OperationParams` interfaces
+- Depends on: `src/lsp/client.ts` (for `LspClient` type reference)
+- Used by: All tool and utility modules
 
-**Tool Handler Layer:**
-- Purpose: Implement specific Godot operations as callable MCP tools
-- Location: `src/index.ts` (lines 920-2143)
-- Contains: 12 handler methods (launch_editor, run_project, create_scene, etc.)
-- Depends on: Execution layer, validation logic
-- Used by: MCP Protocol Layer
+**Godot Process Utilities:**
+- Purpose: All interaction with the Godot executable — path detection, process execution, path validation, process tracking
+- Location: `src/godot.ts`
+- Contains: `detectGodotPath()`, `execGodot()`, `executeOperation()`, `validatePath()`, `trackProcess()`, `isGodot44OrLater()`
+- Depends on: Node.js `child_process`, `fs`, `path`
+- Used by: All tool modules that invoke Godot operations
 
-**File System & Validation Layer:**
-- Purpose: Validate paths, scan project structures, prevent path traversal attacks
-- Location: `src/index.ts` (lines 207-215, 540-655)
-- Contains: Path traversal validation, directory scanning, project detection logic
-- Depends on: Node.js fs module
-- Used by: Tool handlers, configuration layer
+**Tool Domains:**
+- Purpose: Register MCP tools onto the server, implement per-tool business logic
+- Location: `src/tools/` — one file per domain
+  - `src/tools/editor.ts` — `launch_editor`, `run_project`, `get_debug_output`, `stop_project`, `capture_screenshot`
+  - `src/tools/project.ts` — `get_godot_version`, `list_projects`, `get_project_info`, `read_project_settings`, `modify_project_setting`
+  - `src/tools/scene.ts` — `create_scene`, `add_node`, `load_sprite`, `export_mesh_library`, `save_scene`, `read_scene`, `modify_node_property`, `remove_node`, `attach_script`
+  - `src/tools/script.ts` — `validate_scripts`, `list_scripts`, `query_class`
+  - `src/tools/resource.ts` — `read_resource`, `create_resource`
+  - `src/tools/uid.ts` — `get_uid`, `update_project_uids`
+  - `src/tools/diagnostics.ts` — `get_diagnostics`
+- Depends on: `src/godot.ts`, `src/errors.ts`, `src/types.ts`, `src/parsers/*.ts`, `src/lsp/client.ts`
+- Used by: `src/index.ts` (registration only)
+
+**File Parsers:**
+- Purpose: Fast TypeScript-native parsing of Godot file formats, avoiding subprocess overhead for read-only operations
+- Location: `src/parsers/`
+  - `src/parsers/tscn-parser.ts` — Parses `.tscn` (scene) and `.tres` (resource) text-format files
+  - `src/parsers/tscn-types.ts` — Type definitions for parsed scene/resource data
+  - `src/parsers/project-parser.ts` — Parses `project.godot` INI-format settings
+  - `src/parsers/project-types.ts` — Type definitions for parsed project settings
+- Depends on: Node.js `fs`
+- Used by: `src/tools/scene.ts`, `src/tools/resource.ts`, `src/tools/project.ts`
+
+**LSP Layer:**
+- Purpose: JSON-RPC client for Godot's built-in Language Server Protocol over TCP, used to get GDScript diagnostics
+- Location: `src/lsp/`
+  - `src/lsp/client.ts` — `LspClient` class: TCP connection lifecycle, initialize handshake, `getDiagnostics()` via `textDocument/didOpen`
+  - `src/lsp/protocol.ts` — LSP wire framing: `encodeMessage()`, `parseMessages()` for `Content-Length: N\r\n\r\n{json}` framing
+- Depends on: Node.js `net.Socket`
+- Used by: `src/tools/diagnostics.ts`, `src/types.ts`
+
+**MCP Resources:**
+- Purpose: Expose Godot `.tscn` and `.gd` files as MCP resources so LLMs can `@mention` them for inline context
+- Location: `src/resources/godot-resources.ts`
+- Contains: `registerGodotResources()` — registers `godot://scene/{path}` and `godot://script/{path}` URI templates
+- Depends on: `@modelcontextprotocol/sdk`, Node.js `fs`
+- Used by: `src/index.ts`
+
+**Error Utilities:**
+- Purpose: Standardized error response format for all tool handlers
+- Location: `src/errors.ts`
+- Contains: `toolError(message, suggestions)` — returns `ToolResult` with `isError: true` and JSON-encoded suggestions
+- Used by: All tool domain modules
+
+**GDScript Operations Script:**
+- Purpose: The GDScript "backend" that runs in Godot's headless mode to execute engine-native operations
+- Location: `src/scripts/godot_operations.gd` (copied to `build/scripts/` at build time)
+- Contains: A `SceneTree`-extending script with a `match` dispatch over operation names: `create_scene`, `add_node`, `load_sprite`, `export_mesh_library`, `save_scene`, `get_uid`, `resave_resources`, `modify_node_property`, `remove_node`, `attach_script`, `create_resource`, `validate_scripts`, `modify_project_setting`, `list_scripts`, `query_class`
+- Invoked by: `executeOperation()` in `src/godot.ts`
+
+**Screenshot Helper GDScript:**
+- Purpose: Autoload script that users add to their Godot project to enable viewport screenshot capture via polling a trigger file
+- Location: `src/scripts/screenshot_helper.gd` (copied to `build/scripts/` at build time)
+- Trigger mechanism: Polls `res://.godot/screenshot_trigger` every 0.5 seconds; on detection writes `res://.godot/screenshot.png`
 
 ## Data Flow
 
-**Tool Request → Response:**
+**Standard Headless Operation (write/engine path):**
 
-1. MCP client sends `CallToolRequest` with tool name and arguments (camelCase)
-2. `setupToolHandlers()` routes request to specific handler method (line 920-957)
-3. Handler method validates parameters and normalizes them:
-   - Validates paths against traversal attacks
-   - Converts camelCase to snake_case for GDScript compatibility (line 447-472)
-4. Handler calls `executeOperation()` with operation name and parameters
-5. `executeOperation()` spawns headless Godot process via `execFile`:
-   ```
-   godot --headless --path <project> --script godot_operations.gd <operation> <params_json>
-   ```
-6. `godot_operations.gd` (GDScript) executes the operation and outputs results
-7. Results captured as stdout/stderr and formatted into MCP response
-8. Response sent back to client with `content` array and `isError` flag
+1. LLM calls an MCP tool (e.g. `create_scene`) via stdio JSON-RPC
+2. `McpServer` dispatches to the registered handler in `src/tools/scene.ts`
+3. Handler validates paths with `validatePath()` from `src/godot.ts`
+4. Handler calls `executeOperation(ctx, projectPath, 'create_scene', params)` in `src/godot.ts`
+5. `executeOperation` converts camelCase params to snake_case (GDScript convention), serializes to JSON
+6. Spawns: `godot --headless --path <project> --script godot_operations.gd <operation> <params_json>`
+7. GDScript dispatch runs the matching function, outputs results to stdout
+8. TypeScript reads stdout, returns `{ content: [{ type: 'text', text: ... }] }` to the MCP SDK
 
-**Godot Path Detection → Execution:**
+**Fast Read Operation (TypeScript parser path):**
 
-1. Server instantiation optionally accepts `godotPath` in config
-2. On `server.run()`, if no path set, `detectGodotPath()` executes (line 270-356)
-3. Detection order:
-   - If config.godotPath provided: validate and use
-   - Check GODOT_PATH environment variable
-   - Platform-specific paths (OS-dependent common installation locations)
-   - Fallback to default path (with warning in non-strict mode)
-4. Each candidate path validated via `isValidGodotPath()` which runs `godot --version`
-5. Valid paths cached in `this.validatedPaths` Map
-6. If no valid path found and strictPathValidation enabled: throw error; else fallback with warning
+1. LLM calls a read tool (e.g. `read_scene`)
+2. Handler reads file from disk with Node.js `fs.readFileSync`
+3. Calls `parseScene()` from `src/parsers/tscn-parser.ts`
+4. Returns structured JSON without spawning any Godot process
 
-**Process Lifecycle:**
+**LSP Diagnostics Flow:**
 
-1. Tool handler calls `spawn()` or `execFile()` to start Godot process
-2. Process runs with `--headless` flag for no GUI
-3. If `run_project` tool: process stored in `this.activeProcess` for later retrieval
-4. Output captured continuously into `output[]` and `errors[]` arrays
-5. `get_debug_output()` retrieves accumulated output from active process
-6. `stop_project()` kills active process and clears reference
-7. On SIGINT (Ctrl+C): `cleanup()` kills any active process and closes server
+1. LLM calls `get_diagnostics` with a `.gd` file path
+2. `src/tools/diagnostics.ts` checks if `ctx.lspClient` is connected
+3. If no connection: attempts TCP connect to port 6014 (default)
+4. If `ECONNREFUSED`: spawns `godot --editor --headless --lsp-port 6014 --path <project>`, waits for port, then connects
+5. Sends LSP `textDocument/didOpen` notification with file content
+6. Listens for `textDocument/publishDiagnostics` notification (5-second timeout)
+7. Returns diagnostics array as JSON
 
 **State Management:**
-- `this.activeProcess`: Tracks single running Godot project (null when idle)
-- `this.validatedPaths`: Map<string, boolean> caches path validation results
-- `this.godotPath`: String (nullable) stores detected/configured Godot executable path
-- `this.parameterMappings` + `this.reverseParameterMappings`: Bidirectional parameter case conversion
+- `ServerContext` holds all mutable server state: `activeProcess` (currently running project), `trackedProcesses` (all spawned processes for cleanup), `validatedPaths` (cache), `lspClient` (persistent LSP connection), `lspProcess` (headless editor for LSP)
+- State is created once at startup via `createServerContext()` and passed by reference to all tool registrations (closure capture)
 
 ## Key Abstractions
 
-**GodotProcess Interface:**
-- Purpose: Represent a running Godot instance
-- Location: `src/index.ts` (lines 38-42)
-- Pattern: Data class holding process reference and output buffers
-- Used by: `run_project`, `stop_project`, `get_debug_output` handlers
+**ServerContext:**
+- Purpose: Single shared context object threading Godot path, process handles, and LSP client across all tool domains
+- Example: `src/types.ts` (definition), `src/server.ts` (creation), every `src/tools/*.ts` (consumption)
+- Pattern: Dependency injection via function parameter; context is captured in handler closures at `registerXxxTools(server, ctx)` call time
 
-**GodotServerConfig Interface:**
-- Purpose: Configuration passed to server constructor
-- Location: `src/index.ts` (lines 47-52)
-- Properties: godotPath, debugMode, godotDebugMode, strictPathValidation
-- Pattern: Optional configuration object
+**Tool Domain Modules:**
+- Purpose: Each file groups a cohesive set of tools for one Godot concept area
+- Examples: `src/tools/scene.ts`, `src/tools/editor.ts`, `src/tools/script.ts`
+- Pattern: Each module exports a single `registerXxxTools(server: McpServer, ctx: ServerContext): void` function; no classes, no side effects at module load time
 
-**OperationParams Type:**
-- Purpose: Type-safe parameter object for Godot operations
-- Location: `src/index.ts` (line 57-59)
-- Pattern: `Record<string, any>` allowing flexible operation-specific parameters
+**Dual Execution Strategy:**
+- Purpose: Read-only operations use in-process TypeScript parsers for speed; write/engine operations use headless Godot subprocess for correctness
+- Examples: `read_scene` uses `src/parsers/tscn-parser.ts`; `create_scene` uses `executeOperation()` → `godot_operations.gd`
+- Pattern: Explicit branching in each tool handler — no abstraction layer, the choice is visible per-handler
 
-**Tool Handler Pattern:**
-All tool handlers follow similar structure:
-```typescript
-private async handleXxxOperation(args: any) {
-  try {
-    // 1. Validate and normalize parameters
-    // 2. Call executeOperation() with GDScript operation name
-    // 3. Parse stdout/stderr for errors
-    // 4. Return formatted MCP response
-  } catch (error) {
-    return this.createErrorResponse(message, solutions);
-  }
-}
-```
+**ToolResult / toolError:**
+- Purpose: Standardized return type for all MCP tool handlers, ensuring consistent error structure for LLM recovery
+- Example: `src/errors.ts`
+- Pattern: Every error path returns `toolError(message, suggestions[])` which includes actionable recovery hints in the `suggestions` array
 
 ## Entry Points
 
-**CLI Entry Point:**
-- Location: `src/index.ts` (lines 2190-2196)
-- Triggers: `npm run build && node ./build/index.js` or via MCP client configuration
-- Responsibilities: Instantiate GodotServer, call `run()`, exit on error
+**MCP Server CLI:**
+- Location: `src/index.ts` (built to `build/index.js`, made executable)
+- Triggers: Invoked by MCP clients (e.g. Claude Desktop) via stdio JSON-RPC; also via `start.sh` for manual invocation
+- Responsibilities: Bootstrap server, register all tools and resources, handle SIGINT/SIGTERM for graceful shutdown (killing all tracked Godot processes and LSP client)
 
-**MCP Server Runtime:**
-- Location: `src/index.ts` (lines 2149-2187)
-- Triggers: Invoked by MCP transport layer (stdio)
-- Responsibilities:
-  - Detect Godot path
-  - Validate executable
-  - Connect to stdio transport
-  - Begin listening for requests
-
-**Tool Registration & Request Dispatch:**
-- Location: `src/index.ts` (lines 656-958)
-- Triggers: MCP handshake and tool calls
-- Responsibilities:
-  - Register 12 available tools with schemas
-  - Route incoming calls to correct handler
-  - Maintain request/response contract with MCP spec
+**GDScript Operation Dispatcher:**
+- Location: `src/scripts/godot_operations.gd`
+- Triggers: Spawned by `executeOperation()` in `src/godot.ts` with `--headless --script` flags
+- Responsibilities: Parse operation name and JSON params from CLI args, dispatch to the matching GDScript function, quit after completion
 
 ## Error Handling
 
-**Strategy:** Defensive layering with user-friendly error messages
+**Strategy:** Errors are caught at the tool handler boundary and converted to structured `ToolResult` objects with `isError: true`. Errors are never thrown across module boundaries in tool handlers — all errors are caught, logged to stderr, and returned as JSON with recovery suggestions.
 
 **Patterns:**
-
-1. **Path Validation Errors:**
-   - Invalid paths caught early via `validatePath()` (prevents traversal)
-   - Missing/bad Godot path caught during `detectGodotPath()`
-   - Non-existent project paths rejected by handlers
-
-2. **Execution Errors:**
-   - `execFile()` catches command failures
-   - stderr from Godot process parsed for "Failed to" patterns
-   - Both stdout/stderr returned even on non-zero exit (no throw)
-
-3. **MCP Error Format:**
-   - `createErrorResponse()` builds standardized error with optional solutions
-   - Sets `isError: true` flag
-   - Includes "Possible solutions" section for debugging
-
-4. **Logging Strategy:**
-   - Debug output goes to stderr (not stdout which is reserved for JSON-RPC)
-   - Production errors use `console.error()` with `[SERVER]` prefix
-   - DEBUG_MODE env var controls verbosity
+- Path validation always runs first: `if (!validatePath(path)) return toolError(...)`
+- Project file existence checked before any operation: `if (!existsSync(join(project_path, 'project.godot'))) return toolError(...)`
+- All `executeOperation` calls are wrapped in `try/catch`; caught errors call `toolError()`
+- Process timeouts (30s) result in `'Godot operation timed out'` errors surfaced to the LLM
+- `toolError()` logs to stderr (safe for stdio transport) and returns a JSON body with `{ error, suggestions }`
 
 ## Cross-Cutting Concerns
 
-**Logging:**
-- Private `logDebug()` method (line 168-172) controlled by DEBUG_MODE
-- All logs go to stderr to avoid interfering with JSON-RPC stdout communication
-- Godot operations can include `--debug-godot` flag for additional logging
+**Logging:** All logging goes to stderr via `console.error()` (stdout is reserved for MCP protocol). Debug logging gated on `process.env.DEBUG === 'true'` via per-module `logDebug()` functions. The `GODOT_DEBUG_MODE` constant in `src/godot.ts` is hardcoded `true`, appending `--debug-godot` to all headless operations.
 
-**Validation:**
-- Path validation prevents directory traversal via `validatePath()` (line 207-215)
-- Parameter schema defined in tool handlers (lines 663-915)
-- MCP schema validation happens at protocol layer via @modelcontextprotocol/sdk
+**Validation:** Path traversal prevention via `validatePath()` in `src/godot.ts` (rejects paths containing `..`). Input schemas validated by Zod at MCP SDK layer before handlers run.
 
-**Authentication:**
-- Not applicable (local MCP server, no network auth)
-- Godot path detection handles environment variable override
-
-**Parameter Transformation:**
-- Bidirectional mapping between camelCase (JavaScript/MCP) and snake_case (GDScript)
-- `normalizeParameters()` handles null values
-- `convertCamelToSnakeCase()` transforms for Godot compatibility (lines 447-472)
+**Authentication:** None — MCP servers run locally, no auth required.
 
 ---
 

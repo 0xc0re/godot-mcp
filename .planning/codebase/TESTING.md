@@ -4,280 +4,321 @@
 
 ## Test Framework
 
-**Status:** Not detected
+**Runner:**
+- Vitest 4.x
+- Config: `vitest.config.ts`
 
-**No test framework configured.**
+**Assertion Library:**
+- Vitest built-in (`expect`, `vi`)
 
-- No jest.config.* files found
-- No vitest.config.* files found
-- No test scripts in package.json
-- No test files (*.test.ts, *.spec.ts) in source directory
-- No testing dependencies in package.json (no jest, vitest, mocha, chai, etc.)
-
-**Current Testing Approach:**
-The codebase appears to rely on:
-1. Manual/integration testing with actual Godot executable
-2. Inspector tool for MCP protocol testing: `npm run inspector`
-3. No automated test suite
-
-## Package.json Scripts
-
-```json
-{
-  "scripts": {
-    "build": "tsc && node scripts/build.js",
-    "inspector": "npx @modelcontextprotocol/inspector build/index.js",
-    "prepare": "npm run build",
-    "watch": "tsc --watch"
-  }
-}
-```
-
-**Available Commands:**
-- `npm run build` - Compile TypeScript and run build script
-- `npm run inspector` - Launch MCP inspector for manual testing
-- `npm run watch` - Watch mode for TypeScript compilation
-- `npm test` - NOT IMPLEMENTED
-
-## Testing Infrastructure Gaps
-
-**Critical Gaps:**
-1. **No test runner** - Need to add vitest, jest, or mocha
-2. **No test files** - 2196-line monolithic source file has zero test coverage
-3. **No assertion library** - Would need chai, assert, or built-in equivalents
-4. **No mock framework** - Mocking external processes and file system operations
-5. **No CI test execution** - No test scripts in package.json to run in CI/CD
-
-## Areas That Would Require Testing
-
-Based on codebase analysis (`src/index.ts`), these areas lack test coverage:
-
-**Path Validation (lines 207-215):**
-- `validatePath()` - path traversal prevention
-- `isValidGodotPathSync()` - synchronous path validation
-- `isValidGodotPath()` - async path validation with caching
-
-**Godot Detection (lines 270-362):**
-- `detectGodotPath()` - platform-specific path detection
-- Environment variable loading (GODOT_PATH)
-- Platform-specific fallback paths (Darwin, Linux, Windows)
-
-**Parameter Normalization (lines 414-472):**
-- `normalizeParameters()` - snake_case to camelCase conversion
-- `convertCamelToSnakeCase()` - reverse conversion
-- Recursive handling of nested objects
-- Parameter mapping tables
-
-**Tool Handlers (lines 964-1850+):**
-- `handleLaunchEditor()` - project.godot validation, spawn process
-- `handleRunProject()` - process lifecycle, output capture
-- `handleGetDebugOutput()` - output buffer management
-- `handleStopProject()` - process termination
-- `handleCreateScene()` - operation execution
-- `handleAddNode()` - parameter validation
-- `handleGetProjectInfo()` - file I/O, JSON parsing
-- `handleListProjects()` - directory traversal, filtering
-
-**Operation Execution (lines 474-535):**
-- `executeOperation()` - shell command construction safety
-- Process spawning with JSON parameter passing
-- stderr/stdout capture
-- Error handling for execFile failures
-
-**Project Discovery (lines 593-650):**
-- `findGodotProjects()` - recursive directory search
-- project.godot file detection
-- Project filtering and naming
-
-## Recommended Testing Strategy
-
-**Phase 1: Setup**
-Install testing framework and create first test:
+**Run Commands:**
 ```bash
-npm install --save-dev vitest @vitest/ui
+npx vitest run                  # Run all tests (one-shot)
+npx vitest                      # Watch mode
+npx vitest run --reporter=verbose  # Verbose output with test names
 ```
 
-Create `vitest.config.ts`:
-```typescript
-import { defineConfig } from 'vitest/config';
+**Stats:** 16 test files, 143 tests — all passing
 
-export default defineConfig({
-  test: {
-    globals: true,
-    environment: 'node',
-    coverage: {
-      provider: 'v8',
-      reporter: ['text', 'json', 'html'],
-      exclude: [
-        'node_modules/',
-        'dist/',
-        'build/',
-      ]
-    }
-  },
-});
+## Test File Organization
+
+**Location:**
+- Separate `tests/` directory (not co-located with source)
+
+**Naming:**
+- `tests/{domain}-tools.test.ts` for tool handler tests
+- `tests/{module-name}.test.ts` for unit/parser tests
+- `tests/fixtures/` for static test data files
+
+**Structure:**
+```
+tests/
+├── diagnostics-tools.test.ts    # get_diagnostics tool
+├── error-responses.test.ts      # toolError() contract + source conformance
+├── lsp-client.test.ts           # LspClient TCP lifecycle
+├── lsp-protocol.test.ts         # LSP framing encode/parse
+├── process-hardening.test.ts    # execGodot/executeOperation safety
+├── project-parser.test.ts       # project.godot INI parser
+├── project-tools.test.ts        # read_project_settings, modify_project_setting
+├── resource-registration.test.ts # MCP resource templates (scene/script)
+├── resource-tools.test.ts       # read_resource, create_resource
+├── scene-tools.test.ts          # Scene CRUD tools
+├── screenshot-tools.test.ts     # capture_screenshot
+├── script-tools.test.ts         # validate_scripts, list_scripts, query_class
+├── sdk-version.test.ts          # package.json version assertions
+├── signal-handlers.test.ts      # SIGINT/SIGTERM source conformance
+├── tool-registration.test.ts    # McpServer instantiation smoke test
+├── tscn-parser.test.ts          # .tscn/.tres file parser
+└── fixtures/
+    ├── sample.project.godot
+    ├── sample.tres
+    └── sample.tscn
 ```
 
-**Phase 2: Unit Tests**
-Create `src/index.test.ts` with:
-- Path validation tests
-- Parameter normalization tests
-- Type conversions (camelCase ↔ snake_case)
-- Version string parsing
+## Test Structure
 
-**Phase 3: Integration Tests**
-Mock file system and child processes:
+**Suite Organization:**
 ```typescript
-// Example structure
-describe('GodotServer', () => {
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+describe('Scene MCP Tools', () => {
+  let server: McpServer;
+  let ctx: ServerContext;
+  let handlers: Map<string, (params: Record<string, unknown>) => Promise<unknown>>;
+
   beforeEach(() => {
-    vi.mock('child_process');
-    vi.mock('fs');
-  });
-
-  describe('detectGodotPath', () => {
-    it('should find godot in PATH');
-    it('should use GODOT_PATH environment variable');
-    it('should validate path before returning');
-  });
-
-  describe('normalizeParameters', () => {
-    it('should convert snake_case to camelCase');
-    it('should handle nested objects');
-    it('should preserve unknown keys');
-  });
-
-  describe('handleLaunchEditor', () => {
-    it('should validate project.godot exists');
-    it('should spawn process with correct arguments');
-    it('should return error if Godot path not found');
-  });
-});
-```
-
-**Phase 4: Mocking Strategy**
-Key modules to mock:
-- `child_process.spawn()` and `execFile()` - mock process lifecycle
-- `fs` operations - mock file existence checks
-- `@modelcontextprotocol/sdk` - mock Server and schema validation
-
-## Testing Patterns to Implement
-
-**Error Testing Pattern:**
-```typescript
-describe('error handling', () => {
-  it('should return error response for missing parameters', async () => {
-    const server = new GodotServer();
-    const result = await server.handleLaunchEditor({ /* no projectPath */ });
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('Project path is required');
-  });
-
-  it('should include possible solutions in error response', async () => {
-    const result = /* error response */;
-
-    expect(result.content.length).toBeGreaterThan(1);
-    expect(result.content[1].text).toContain('Possible solutions');
-  });
-});
-```
-
-**Async Testing Pattern:**
-```typescript
-describe('async operations', () => {
-  it('should handle process spawning', async () => {
-    vi.mocked(execFileAsync).mockResolvedValue({
-      stdout: '4.4.0\n',
-      stderr: ''
-    });
-
-    const server = new GodotServer();
-    const result = await server.handleGetGodotVersion();
-
-    expect(result.content[0].text).toBe('4.4.0');
-  });
-});
-```
-
-**File I/O Testing Pattern:**
-```typescript
-describe('file operations', () => {
-  it('should read project.godot for configuration', async () => {
-    vi.mocked(readFileSync).mockReturnValue(
-      'config/name="MyProject"\n[application]'
+    vi.clearAllMocks();
+    server = new McpServer(
+      { name: 'test', version: '0.0.1' },
+      { capabilities: { tools: {} } },
     );
+    ctx = createTestContext();
+    handlers = getToolHandlers(server);
+    registerSceneTools(server, ctx);
+  });
 
-    const info = await server.handleGetProjectInfo({
-      projectPath: '/path/to/project'
-    });
-
-    expect(info).toContain('MyProject');
+  describe('read_scene', () => {
+    it('reads file and returns parsed scene JSON', async () => { ... });
+    it('returns toolError for invalid paths', async () => { ... });
+    it('returns toolError when project.godot missing', async () => { ... });
   });
 });
 ```
 
-## Coverage Targets
+**Patterns:**
+- `beforeEach`: `vi.clearAllMocks()` + fresh server + fresh context + register tools
+- Nested `describe` per tool name, flat `it` per scenario
+- Test names describe behavior: `'returns toolError for invalid paths'`, `'passes correct params to executeOperation'`
 
-**Recommended Minimum Coverage:**
-- Statements: 70% (high priority for critical paths)
-- Branches: 60% (focus on error conditions)
-- Functions: 80% (cover all handlers)
-- Lines: 70%
+## Mocking
 
-**High-Priority Coverage Areas:**
-1. Path validation (`validatePath()`, `isValidGodotPath*()`) - security sensitive
-2. Parameter normalization - affects all tool execution
-3. Error responses - user-facing critical
-4. Tool handlers - main entry points
-5. Operation execution - interfaces with Godot
+**Framework:** Vitest `vi.mock()` with module factory pattern
 
-**Lower-Priority Areas (may skip for MVP):**
-- Platform-specific detection fallbacks
-- Version parsing edge cases
-- Project structure traversal (integration test better)
+**Standard Mock Stack for Tool Tests:**
+```typescript
+// Mock fs module (preserve actual for vi.importActual usage in some tests)
+vi.mock('fs', async () => {
+  const actual = await vi.importActual<typeof import('fs')>('fs');
+  return {
+    ...actual,
+    existsSync: vi.fn(),
+    readFileSync: vi.fn(),
+  };
+});
 
-## Running Tests
+// Mock godot module (isolate from real Godot process)
+vi.mock('../src/godot.js', () => ({
+  validatePath: vi.fn(),
+  executeOperation: vi.fn(),
+}));
 
-**Once implemented, commands will be:**
-```bash
-npm run test              # Run all tests
-npm run test:watch      # Watch mode
-npm run test:coverage   # Generate coverage report
-npm run test:ui         # Interactive UI
+// Mock errors module (standardized error shape for assertions)
+vi.mock('../src/errors.js', () => ({
+  toolError: vi.fn((message: string, suggestions: string[] = []) => ({
+    content: [{ type: 'text' as const, text: JSON.stringify({ error: message, suggestions }) }],
+    isError: true,
+  })),
+}));
 ```
 
-**Add to package.json:**
-```json
-{
-  "scripts": {
-    "test": "vitest",
-    "test:watch": "vitest --watch",
-    "test:coverage": "vitest --coverage",
-    "test:ui": "vitest --ui"
-  }
+**Tool Handler Extraction Pattern:**
+Since `McpServer.registerTool()` doesn't expose handlers directly, all tool tests use this interceptor:
+
+```typescript
+function getToolHandlers(
+  server: McpServer,
+): Map<string, (params: Record<string, unknown>) => Promise<unknown>> {
+  const handlers = new Map<string, (params: Record<string, unknown>) => Promise<unknown>>();
+  const originalRegisterTool = server.registerTool.bind(server);
+
+  server.registerTool = function (name: string, _config: unknown, handler: unknown) {
+    handlers.set(name, handler as (params: Record<string, unknown>) => Promise<unknown>);
+    return originalRegisterTool(name, _config, handler);
+  } as typeof server.registerTool;
+
+  return handlers;
 }
 ```
 
-## Current Validation Approach
+**What to Mock:**
+- `fs` functions (`existsSync`, `readFileSync`, `writeFileSync`, `statSync`, `unlinkSync`)
+- `child_process` (`execFile`, `spawn`)
+- `../src/godot.js` (`validatePath`, `executeOperation`, `execGodot`, `trackProcess`)
+- `../src/errors.js` (`toolError`) — always mocked with the same standard implementation
+- `../src/parsers/tscn-parser.js` / `../src/parsers/project-parser.js` — when testing tool layer only
+- LSP client (`../src/lsp/client.js`) — mock for diagnostics tool tests
+- `net` — mock `Socket` class for LSP client tests
 
-Since no automated tests exist, the project uses:
+**What NOT to Mock:**
+- Parser logic (`tscn-parser.ts`, `project-parser.ts`) when testing parsers directly
+- LSP protocol framing (`lsp/protocol.ts`) when testing protocol unit tests
+- `McpServer` from `@modelcontextprotocol/sdk` — always use real instance
 
-**Manual Validation:**
-- `npm run build` - TypeScript compilation validates syntax and types
-- `npm run inspector` - MCP protocol validator tests running server
-- Manual testing with actual Godot executable
+## Test Context Factory
 
-**Type Safety:**
-- `tsconfig.json` with `"strict": true` catches type errors at compile time
-- Strong typing of interfaces and class members
+All test files define a `createTestContext()` helper returning a minimal `ServerContext`:
 
-**Code Quality:**
-- No linting rules enforced (no ESLint)
-- Manual review of contributions required
+```typescript
+function createTestContext(): ServerContext {
+  return {
+    godotPath: '/usr/bin/godot',
+    operationsScriptPath: '/path/to/godot_operations.gd',
+    activeProcess: null,
+    trackedProcesses: new Set(),
+    validatedPaths: new Map(),
+  };
+}
+```
+
+Some tests use an overrides variant:
+```typescript
+function createTestContext(overrides?: Partial<ServerContext>): ServerContext {
+  return {
+    godotPath: '/usr/bin/godot',
+    ...overrides,
+  };
+}
+```
+
+## Fixtures and Factories
+
+**Test Data:**
+- Static fixture files in `tests/fixtures/`
+- Loaded with `readFileSync` + `import.meta.dirname` path resolution
+
+```typescript
+const FIXTURES = join(import.meta.dirname, 'fixtures');
+
+it('parses the sample.tscn fixture', () => {
+  const content = readFileSync(join(FIXTURES, 'sample.tscn'), 'utf-8');
+  const scene = parseScene(content);
+  expect(scene.format).toBe(3);
+});
+```
+
+**Inline Data:**
+- Short fixtures created inline as template literals directly in test cases
+- Mock data objects constructed inline per test: `const mockParsed = { type: 'StandardMaterial3D', ... }`
+
+## Coverage
+
+**Requirements:** None enforced (no coverage thresholds configured in `vitest.config.ts`)
+
+**View Coverage:**
+```bash
+npx vitest run --coverage
+```
+
+## Test Types
+
+**Unit Tests:**
+- Pure function tests: `tscn-parser.test.ts`, `lsp-protocol.test.ts`, `project-parser.test.ts`
+- No external dependencies, no mocks
+- Tests cover: happy path, edge cases (empty input, partial buffers), multi-line values, UTF-8
+
+**Integration Tests (Isolated):**
+- Tool handler tests: all tests in `tests/*-tools.test.ts`
+- Full handler logic exercised against a real `McpServer` instance
+- Dependencies (fs, godot, LSP) fully mocked
+
+**Conformance / Source Analysis Tests:**
+- `error-responses.test.ts`: Reads source files of all tool modules and asserts they import `toolError` and don't use ad-hoc `isError:`
+- `signal-handlers.test.ts`: Reads `src/index.ts` and asserts SIGINT/SIGTERM handler presence via regex
+- `sdk-version.test.ts`: Parses `package.json` and asserts SDK version constraints
+
+**E2E Tests:**
+- Not present — no tests invoke real Godot processes
+
+## Common Patterns
+
+**Async Testing:**
+```typescript
+it('passes correct params to executeOperation', async () => {
+  vi.mocked(validatePath).mockReturnValue(true);
+  vi.mocked(existsSync).mockReturnValue(true);
+  vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+
+  const handler = handlers.get('modify_node_property')!;
+  await handler({ project_path: '/my/project', ... });
+
+  expect(executeOperation).toHaveBeenCalledWith(
+    ctx,
+    '/my/project',
+    'modify_node_property',
+    expect.objectContaining({ scenePath: 'scenes/main.tscn' }),
+  );
+});
+```
+
+**Error Path Testing:**
+```typescript
+it('returns toolError for invalid paths', async () => {
+  vi.mocked(validatePath).mockReturnValue(false);
+
+  const handler = handlers.get('read_scene')!;
+  const result = await handler({
+    project_path: '/my/../project',
+    scene_path: 'scenes/main.tscn',
+  }) as { isError?: boolean };
+
+  expect(result.isError).toBe(true);
+});
+```
+
+**Timer Testing (for polling/timeout):**
+```typescript
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+it('returns error when screenshot times out', async () => {
+  const resultPromise = handler({ project_path: '/my/project' });
+  await vi.advanceTimersByTimeAsync(6000);  // Past 5s timeout
+  const result = await resultPromise as { isError?: boolean };
+  expect(result.isError).toBe(true);
+});
+```
+
+**LSP Socket Mock Pattern:**
+```typescript
+let mockSocket: EventEmitter & { connect: ReturnType<typeof vi.fn>; ... };
+
+vi.mock('net', () => ({
+  Socket: class MockSocket {
+    constructor() { return mockSocket; }
+  },
+}));
+
+// In test: emit events to drive async flows
+mockSocket.emit('connect');
+mockSocket.emit('data', responseBuffer);
+await vi.advanceTimersByTimeAsync(0);
+```
+
+**Result Parsing for JSON Content:**
+```typescript
+const result = await handler({ project_path: '/my/project' })
+  as { content: Array<{ type: string; text: string }> };
+
+const parsed = JSON.parse(result.content[0].text);
+expect(parsed.configVersion).toBe(5);
+```
+
+**Spy Pattern (for resource registration):**
+```typescript
+registerResourceSpy = vi.spyOn(server, 'registerResource');
+registerGodotResources(server, ctx);
+
+const sceneCall = registerResourceSpy.mock.calls.find(
+  (call) => call[0] === 'godot-scene',
+);
+expect(sceneCall![1]).toBeInstanceOf(ResourceTemplate);
+```
 
 ---
 
 *Testing analysis: 2026-03-03*
-
-**Recommendation:** Implement vitest-based test suite starting with unit tests for `GodotServer` class. Priority should be path validation and error handling patterns which are security and user-experience critical.

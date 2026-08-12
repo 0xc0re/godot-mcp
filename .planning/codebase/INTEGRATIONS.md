@@ -4,127 +4,118 @@
 
 ## APIs & External Services
 
-**Godot Engine:**
-- Godot Editor/Engine executable - Used for launching editor and running projects
-  - Invoked via child_process (spawn, execFile) from `src/index.ts`
-  - Supports both headless and GUI execution modes
-  - Auto-detection for multiple platforms: Windows, macOS, Linux
-
 **Model Context Protocol (MCP):**
-- @modelcontextprotocol/sdk 0.6.0 - Provides standardized interface for AI assistants
-  - Implements StdioServerTransport for stdio-based communication
-  - Defines tool request/response schemas (CallToolRequestSchema, ListToolsRequestSchema)
-  - Exception handling via McpError with ErrorCode definitions
+- The server implements the MCP specification — it IS an integration point for AI clients (Claude Desktop, Claude Code, Cline, etc.)
+- SDK/Client: `@modelcontextprotocol/sdk` ^1.27.1
+- Transport: stdio (reads from stdin, writes to stdout per MCP spec)
+- Inspector: `npx @modelcontextprotocol/inspector build/index.js` (dev tool)
+- Configuration example in `.mcp.json`: `{ "mcpServers": { "godot-mcp": { "command": "node", "args": ["/path/to/build/index.js"] } } }`
+
+**Godot Game Engine (local process):**
+- The primary external integration — all tools shell out to the Godot executable
+- Auth: None (local binary, path resolved from `GODOT_PATH` env or auto-detected)
+- Interaction modes:
+  1. `execFile` (sync, 30s timeout, 10MB buffer) — `--version`, `--headless --script` operations
+  2. `spawn` (async, long-running) — editor launch, project run, screenshot resize
+  3. TCP socket to LSP port — diagnostics tool connects to Godot's language server on port 6014
 
 ## Data Storage
 
 **Databases:**
-- None - This is a stateless server
+- None. No database of any kind.
 
 **File Storage:**
-- Local filesystem only - Works with existing Godot project files
-  - Reads `project.godot` for project configuration
-  - Accesses Godot project scenes (.tscn files)
-  - Manages GDScript files
-  - Handles resources (textures, meshes, etc.)
-  - All paths validated against traversal attacks (`src/index.ts` lines 205-215)
+- Local filesystem only. Reads and writes Godot project files directly:
+  - `.tscn` (scene files) — read by `src/parsers/tscn-parser.ts`, written via Godot headless
+  - `.tres` (resource files) — read by `src/parsers/tscn-parser.ts` (`parseResource`), written via Godot headless
+  - `project.godot` (INI-format settings) — read by `src/parsers/project-parser.ts`, written via Godot headless
+  - `.gd` (GDScript files) — read directly for LSP diagnostics
+  - `.godot/screenshot_trigger` — temp trigger file for screenshot IPC
+  - `.godot/screenshot.png` — temp output file for screenshot capture
 
 **Caching:**
-- Godot path validation cache - Map<string, boolean> (`src/index.ts` line 69)
-  - Caches validated Godot executable paths to avoid repeated validation
+- In-memory path validation cache only (`Map<string, boolean>` in `ServerContext.validatedPaths`)
 
 ## Authentication & Identity
 
 **Auth Provider:**
-- None - No authentication required for MCP server itself
-- AI assistants (Cline, Cursor, Claude) handle their own authentication
-
-**Configuration Methods:**
-- Cline: Via `~/.../cline_mcp_settings.json` with env vars
-- Cursor: Via Cursor Settings UI or `.cursor/mcp.json` project config
-- Command-line: Pass GodotServerConfig object to class constructor
+- None. The server runs as a local stdio process with no auth, users, or sessions.
 
 ## Monitoring & Observability
 
 **Error Tracking:**
-- None - No external error tracking service
+- None. No external error tracking service.
 
 **Logs:**
-- Console-based logging:
-  - Debug logs to `console.error()` for DEBUG mode (prevents stdout pollution from JSON-RPC)
-  - Error logs to `console.error()` for visibility
-  - Info logs to `stdout` for command output
-  - `src/index.ts` lines 168-172 for logDebug() implementation
-  - Godot operation logs to console via GDScript `log_info()`, `log_error()`, `log_debug()`
-
-**Godot Debug Output:**
-- Captures stdout/stderr from running Godot processes
-- GodotProcess interface stores output/errors arrays (`src/index.ts` lines 38-42)
-- `get_debug_output` tool returns captured output
+- All logging uses `console.error()` (safe for stdio transport — stdout is reserved for MCP protocol)
+- Log prefixes: `[MCP Error]`, `[SERVER]`, `[DEBUG]`
+- Debug mode: set `DEBUG=true` env var to enable `[DEBUG]` messages in `src/godot.ts` and `src/tools/editor.ts`
 
 ## CI/CD & Deployment
 
 **Hosting:**
-- npm registry (npmjs.org) for package distribution
-- GitHub (github.com/Coding-Solo/godot-mcp) for source code
-- AI assistant environments (Cline, Cursor, etc.) for runtime
+- Published to npm as `godot-mcp` package (homepage: https://github.com/Coding-Solo/godot-mcp)
+- No cloud hosting — runs entirely on user's local machine
 
 **CI Pipeline:**
-- GitHub Actions (not configured - no workflows in `.github/`)
-- Manual package publishing to npm
-
-**Deployment Method:**
-- npm package installation: `npm install godot-mcp`
-- Binary entry point: `node build/index.js`
-- Configured in AI assistant MCP settings files
+- No CI configuration found. Only `.github/FUNDING.yml` exists; no workflow files.
 
 ## Environment Configuration
 
 **Required env vars:**
-- None - All configurations are optional
+- None strictly required. The server starts with fallback Godot paths if nothing is set.
 
 **Optional env vars:**
-- `GODOT_PATH` - Path to Godot executable (e.g., `/usr/bin/godot` or `C:\Program Files\Godot\Godot.exe`)
-- `DEBUG` - Set to `"true"` for detailed logging
-
-**Default Godot Paths (Auto-detection):**
-- Linux: `/usr/bin/godot`, `/usr/local/bin/godot`, `/snap/bin/godot`, `$HOME/.local/bin/godot`
-- macOS: `/Applications/Godot.app/Contents/MacOS/Godot`, `/Applications/Godot_4.app/Contents/MacOS/Godot`, Steam paths
-- Windows: `C:\Program Files\Godot\Godot.exe`, `C:\Program Files (x86)\Godot\Godot.exe`
+- `GODOT_PATH` — Path to Godot executable. Without this, auto-detection runs platform-specific common paths:
+  - Linux: `godot`, `/usr/bin/godot`, `/usr/local/bin/godot`, `/snap/bin/godot`, `~/.local/bin/godot`
+  - macOS: `/Applications/Godot.app/Contents/MacOS/Godot`, Steam path, etc.
+  - Windows: `C:\Program Files\Godot\Godot.exe`, etc.
+- `GODOT_PROJECT_PATH` — Root path for MCP resource listing (godot://scene/ and godot://script/ resources). Falls back to `process.cwd()` if not set.
+- `DEBUG=true` — Enables verbose stderr logging
 
 **Secrets location:**
-- Not applicable - No secrets used by this server
+- No secrets. No API keys, tokens, or credentials of any kind.
 
 ## Webhooks & Callbacks
 
 **Incoming:**
-- None - Server does not accept incoming webhooks
+- None. The server does not expose any HTTP endpoints.
 
 **Outgoing:**
-- None - Server does not send webhooks
+- None. The server makes no HTTP calls.
 
-## Tool Integration with AI Assistants
+## LSP Integration (Godot Language Server)
 
-**Cline Integration:**
-- Configuration: `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`
-- Auto-approve list: All 14 tools are listed for automatic approval
-- Environment: Pass DEBUG env var for logging
+**Protocol:** Language Server Protocol 3.17 over TCP (JSON-RPC 2.0 with `Content-Length` framing)
+- Implementation: `src/lsp/client.ts` (TCP client), `src/lsp/protocol.ts` (message framing)
+- Default port: 6014 (non-default to avoid conflict with user's Godot editor on port 6005)
+- Connection lifecycle:
+  1. Try connecting to existing LSP server on port 6014
+  2. If `ECONNREFUSED`, spawn headless Godot editor: `godot --editor --headless --lsp-port 6014 --path <project>`
+  3. Wait up to 10 seconds for port to accept connections
+  4. Send LSP `initialize` + `initialized` handshake
+  5. Send `textDocument/didOpen`, collect `textDocument/publishDiagnostics` notifications
+  6. Reuse `ctx.lspClient` across tool calls (persistent connection per server session)
 
-**Cursor Integration:**
-- Configuration: Cursor Settings > Features > MCP
-- Project-specific: `.cursor/mcp.json` at project root
-- Tool discovery: Automatic via MCP protocol
+## GDScript Operations Bridge
 
-**Claude/Other Assistants:**
-- Standard MCP protocol via stdio transport
-- Tools exposed: 14 total (launch_editor, run_project, get_debug_output, stop_project, get_godot_version, list_projects, get_project_info, create_scene, add_node, load_sprite, export_mesh_library, save_scene, get_uid, update_project_uids)
+**Pattern:** TypeScript -> Godot headless subprocess -> stdout JSON
+- The bridge script `src/scripts/godot_operations.gd` (copied to `build/scripts/godot_operations.gd` at build time) is invoked as:
+  ```
+  godot --headless --path <project> --script godot_operations.gd <operation> <json_params>
+  ```
+- Operations supported: `create_scene`, `add_node`, `load_sprite`, `export_mesh_library`, `save_scene`, `modify_node_property`, `remove_node`, `attach_script`, `validate_scripts`, `list_scripts`, `query_class`, `modify_project_setting`, `get_uid`, `resave_resources`
+- Parameter encoding: camelCase keys converted to snake_case before JSON serialization (in `src/godot.ts` `convertCamelToSnakeCase`)
+- Result parsing: TypeScript tools scan stdout lines for the first `{`-prefixed JSON line
 
-## Godot Version Compatibility
+## Screenshot IPC
 
-**Version Detection:**
-- Uses `--version` flag to validate Godot executable (`src/index.ts` line 255)
-- Version parsing: Regex match for `(\d+)\.(\d+)` format (`src/index.ts` line 400)
-- Godot 4.4+ specific features: UID management (get_uid, update_project_uids)
+**Pattern:** File-system trigger/response between Node.js and running Godot game
+- Trigger: write empty file to `<project>/.godot/screenshot_trigger`
+- Response: Godot's `screenshot_helper.gd` autoload detects trigger, captures viewport, writes `<project>/.godot/screenshot.png`
+- Timeout: 5 seconds, 100ms polling interval
+- Post-processing: if PNG > 800KB, resize to 960x540 via second headless Godot invocation
+- Output: base64-encoded PNG returned as MCP image content
 
 ---
 

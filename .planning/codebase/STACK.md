@@ -5,92 +5,82 @@
 ## Languages
 
 **Primary:**
-- TypeScript 5.3.3 - Main server implementation (`src/index.ts`)
-- GDScript - Godot engine scripting for complex operations (`src/scripts/godot_operations.gd`)
+- TypeScript 5.3.3 - All server logic, tool implementations, parsers, LSP client
+- GDScript (Godot 4.x) - Headless operations script bundled with the server
 
 **Secondary:**
-- JavaScript - Build tooling and Node.js runtime
+- JavaScript (ES module) - Build script at `scripts/build.js`, post-compile chmod/copy
+- Bash - Dev launcher script at `start.sh`
 
 ## Runtime
 
 **Environment:**
-- Node.js 18.0.0 or higher (see `package.json` engines field)
+- Node.js >=18.0.0 (required, enforced via `engines` field in `package.json`)
 
 **Package Manager:**
-- npm (with lock file: `package-lock.json`)
+- npm (no version pinned)
+- Lockfile: `package-lock.json` present
 
 ## Frameworks
 
 **Core:**
-- @modelcontextprotocol/sdk 0.6.0 - MCP (Model Context Protocol) server implementation for AI assistant integration
+- `@modelcontextprotocol/sdk` ^1.27.1 - MCP server framework: `McpServer`, `StdioServerTransport`, `ResourceTemplate`
+
+**Testing:**
+- `vitest` ^4.0.18 - Test runner and assertion library; config at `vitest.config.ts`
 
 **Build/Dev:**
-- TypeScript 5.3.3 - Type checking and transpilation
-- @types/node 20.11.24 - Type definitions for Node.js APIs
+- `typescript` ^5.3.3 - TypeScript compiler (`tsc`); config at `tsconfig.json`
+- `fs-extra` ^11.2.0 - Used in `scripts/build.js` for post-build file copies
 
 ## Key Dependencies
 
 **Critical:**
-- @modelcontextprotocol/sdk 0.6.0 - Provides Server class, StdioServerTransport, and types for MCP protocol implementation (imports from `src/index.ts` lines 16-23)
-- fs-extra 11.2.0 - Enhanced filesystem utilities for build process (file copying, directory management)
-- axios 1.7.9 - HTTP client library (imported but primarily unused in current codebase)
+- `@modelcontextprotocol/sdk` ^1.27.1 - The entire server is built on this SDK. Provides `McpServer`, tool registration, resource registration, and `StdioServerTransport`. Imported from `@modelcontextprotocol/sdk/server/mcp.js` and `@modelcontextprotocol/sdk/server/stdio.js`.
+- `zod` ^3.25.76 - Schema validation for all tool `inputSchema` definitions. Every tool parameter is declared as a Zod schema object.
 
 **Infrastructure:**
-- content-type 1.0.5 - Content type parsing (transitive dependency via MCP SDK)
-- raw-body 3.0.0 - Parse raw request bodies (transitive dependency via MCP SDK)
-- zod 3.23.8 - TypeScript-first schema validation (transitive dependency via MCP SDK)
+- `fs-extra` ^11.2.0 - Used only in `scripts/build.js` for `ensureDirSync` and `copyFileSync`; not imported in runtime source
+- Node.js built-ins used heavily: `child_process` (execFile, spawn), `fs` (existsSync, readFileSync, writeFileSync, unlinkSync, statSync, readdirSync), `net` (Socket for LSP TCP), `path`, `url`, `util`
 
 ## Configuration
 
-**Environment:**
-- `DEBUG` - Set to `"true"` to enable detailed server-side debug logging (line 26 in `src/index.ts`)
-- `GODOT_PATH` - Override automatic Godot executable detection with custom path (line 278 in `src/index.ts`)
+**TypeScript:**
+- `tsconfig.json` at project root
+- Target: `ES2022`
+- Module system: `nodenext` (ESM)
+- Output: `./build/`
+- Source root: `./src/`
+- Strict mode: enabled
+- `resolveJsonModule`: true
 
 **Build:**
-- `tsconfig.json` - TypeScript compiler configuration targeting ES2022, ESNext modules
-  - Output directory: `./build`
-  - Source root: `./src`
-  - Strict mode enabled
+- Compile step: `tsc` outputs to `build/`
+- Post-compile step: `node scripts/build.js` copies GDScript files and sets `build/index.js` executable
+- Full build command: `npm run build` (runs `tsc && node scripts/build.js`)
+- Watch mode: `npm run watch` (runs `tsc --watch`, no post-compile step)
 
-**Package Metadata:**
-- Entry point: `build/index.js` (binary: `godot-mcp`)
-- Files included in npm package: `build/` directory only
-- License: MIT
-- Type: ESM (ECMAScript modules)
+**Testing:**
+- `vitest.config.ts` at project root
+- Test glob: `tests/**/*.test.ts`
+
+**Environment Variables:**
+- `GODOT_PATH` - Override auto-detected Godot executable path
+- `GODOT_PROJECT_PATH` - Project root for MCP resource listing (godot://scene/ and godot://script/)
+- `DEBUG=true` - Enable verbose `[DEBUG]` stderr logging in godot.ts and editor.ts
 
 ## Platform Requirements
 
 **Development:**
-- Node.js >= 18.0.0
-- npm for package management
-- TypeScript compiler
-- Godot Engine installed on system (any supported version for testing)
+- Node.js >=18.0.0
+- Godot 4.x installed (auto-detected or set via `GODOT_PATH`)
+- TypeScript compiler (installed as devDependency)
 
 **Production:**
-- Node.js >= 18.0.0
-- Godot Engine installed on the system running the MCP server
-- AI assistant supporting MCP protocol (Cline, Cursor, or similar)
-
-## Build Process
-
-**Scripts:**
-- `npm run build` - Compile TypeScript and run build post-processing (`tsc && node scripts/build.js`)
-- `npm run watch` - Watch mode TypeScript compilation (`tsc --watch`)
-- `npm run inspector` - Launch MCP inspector tool for debugging
-- `npm run prepare` - Pre-publish hook that runs build
-
-**Build Post-Processing:**
-- `scripts/build.js` - Makes `build/index.js` executable (chmod 755) and copies `src/scripts/godot_operations.gd` to `build/scripts/`
-
-## Output & Distribution
-
-**Build Artifacts:**
-- `build/index.js` - Compiled and executable MCP server entry point
-- `build/scripts/godot_operations.gd` - Bundled GDScript operations file for Godot
-
-**Distribution:**
-- npm package (https://registry.npmjs.org/@modelcontextprotocol/sdk)
-- GitHub repository: https://github.com/Coding-Solo/godot-mcp
+- Distributed as npm package (`godot-mcp`), entry point: `./build/index.js`
+- Consumed as a stdio MCP server — clients connect via stdio pipe
+- Godot executable must be available on target machine
+- The `build/` directory is the published artifact (`.gitignore` excludes it; `files` in `package.json` includes only `build`)
 
 ---
 

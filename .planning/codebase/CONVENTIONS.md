@@ -5,262 +5,180 @@
 ## Naming Patterns
 
 **Files:**
-- Single monolithic source file: `src/index.ts`
-- Supporting scripts: `src/scripts/[name].gd` (GDScript files)
-- No separate component/module files
+- kebab-case for multi-word files: `tscn-parser.ts`, `project-parser.ts`, `tscn-types.ts`
+- Domain-prefixed grouping: `src/tools/scene.ts`, `src/tools/editor.ts`, `src/tools/diagnostics.ts`
+- Test files mirror source names with `.test.ts` suffix: `scene-tools.test.ts`, `tscn-parser.test.ts`
 
 **Functions:**
-- camelCase for all function names: `logDebug()`, `handleLaunchEditor()`, `normalizeParameters()`
-- Private methods prefixed with `private`: `private async detectGodotPath()`
-- Public methods prefixed with `public`: `public async setGodotPath()`
-- Async functions use `async` keyword: `private async executeOperation()`
-- Handler functions use `handle` prefix: `handleLaunchEditor()`, `handleRunProject()`, `handleCreateScene()`
+- camelCase: `toolError()`, `validatePath()`, `executeOperation()`, `trackProcess()`, `isValidGodotPath()`
+- Boolean predicates prefixed with `is`: `isBalanced()`, `isValidGodotPath()`, `isGodot44OrLater()`
+- Registration functions prefixed with `register`: `registerSceneTools()`, `registerEditorTools()`, `registerDiagnosticsTools()`
+- Private helpers are local functions (not exported): `logDebug()`, `parseSectionHeader()`, `parsePropertyLine()`, `buildExtResource()`, `buildNode()`
 
 **Variables:**
-- camelCase for all variable names: `godotPath`, `activeProcess`, `debugMode`, `projectPath`
-- Constants use UPPER_SNAKE_CASE: `DEBUG_MODE`, `GODOT_DEBUG_MODE`
-- Private class properties use camelCase with `private` visibility: `private godotPath: string | null = null`
-- Interface fields use camelCase: `godotPath?: string`, `debugMode?: boolean`
+- camelCase: `godotPath`, `activeProcess`, `trackedProcesses`, `validatedPaths`, `lspClient`
+- Constants in SCREAMING_SNAKE_CASE: `MAX_BUFFER`, `EXEC_TIMEOUT`, `SCREENSHOT_SIZE_THRESHOLD`, `SCREENSHOT_TIMEOUT_MS`, `DEFAULT_LSP_PORT`, `PORT_WAIT_TIMEOUT_MS`
+- Boolean flags: `DEBUG_MODE`, `GODOT_DEBUG_MODE`
 
-**Types:**
-- PascalCase for interfaces: `GodotProcess`, `GodotServerConfig`, `OperationParams`
-- Generic type parameters use single uppercase letters: `Promise<{ stdout: string; stderr: string }>`
-- Union types use `|` operator: `string | null`, `string[]`
+**Types / Interfaces:**
+- PascalCase for interfaces: `ServerContext`, `GodotProcess`, `OperationParams`, `ToolResult`, `SectionHeader`
+- PascalCase for type aliases and imported types: `ParsedScene`, `ParsedResource`, `SceneNode`, `ExtResource`
+- Interface-first, no `I` prefix
 
-**Interfaces:**
-- Descriptive names with "Config" suffix for configuration: `GodotServerConfig`
-- Descriptive names with "Params" suffix for operation parameters: `OperationParams`
-- JSDoc comments explaining purpose: `interface GodotProcess { ... }`
+**MCP Tool Parameters:**
+- snake_case in Zod inputSchema (matching MCP convention): `project_path`, `scene_path`, `node_type`, `root_node_type`
+- camelCase when building internal params object passed to `executeOperation`: `scenePath`, `rootNodeType`, `nodeName`
 
 ## Code Style
 
 **Formatting:**
-- TypeScript compiler (tsc) used for compilation, no explicit formatter enforced
-- tsconfig.json specifies target ES2022, module ESNext
-- Indentation: 2 spaces (evident from code samples)
-- Line length: No enforced limit observed
-- Strict TypeScript: `"strict": true` enables all strict checking
+- No Prettier or ESLint config detected — formatting is manually applied and consistent
+- 2-space indentation throughout
+- Single quotes for string literals in TypeScript source
+- `as const` type assertions on string literals in content arrays: `type: 'text' as const`
+- Trailing commas in multi-line function calls and array/object literals
+- Semicolons throughout
+
+**TypeScript Strictness:**
+- `strict: true` in `tsconfig.json` — all strict checks enabled
+- `error: unknown` in catch blocks, always narrowed with `error instanceof Error ? error.message : 'Unknown error'`
+- Non-null assertions (`!`) used only where logically guaranteed (e.g., handler Map lookups in tests)
+- Explicit `type` keyword for type-only imports: `import type { ServerContext } from './types.js'`
+- `.js` extensions on all internal imports (required by `module: "nodenext"`)
 
 **Linting:**
-- No eslint or prettier configuration found in repository
-- Conventions appear to be adhered to manually
+- No ESLint config present — convention enforced by code review and TypeScript strict mode
+- Unused parameters prefixed with `_`: `_config`, `_options`, `_path`
 
 ## Import Organization
 
 **Order:**
-1. Standard library imports (Node.js built-ins): `import { ... } from 'url'`, `import { ... } from 'path'`
-2. External packages: `import { ... } from '@modelcontextprotocol/sdk/...'`
-3. Local imports: None present (monolithic structure)
-
-**Example from `src/index.ts` (lines 10-23):**
-```typescript
-import { fileURLToPath } from 'url';
-import { join, dirname, basename, normalize } from 'path';
-import { existsSync, readdirSync, mkdirSync } from 'fs';
-import { spawn, execFile } from 'child_process';
-import { promisify } from 'util';
-
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import {
-  CallToolRequestSchema,
-  ErrorCode,
-  ListToolsRequestSchema,
-  McpError,
-} from '@modelcontextprotocol/sdk/types.js';
-```
+1. Node built-in modules: `child_process`, `fs`, `path`, `url`, `util`, `events`, `net`
+2. External packages: `@modelcontextprotocol/sdk/...`, `zod`
+3. Internal project imports: `../types.js`, `../godot.js`, `../errors.js`, `../parsers/tscn-parser.js`
 
 **Path Aliases:**
-- None used - direct imports from node_modules and SDK
+- None — relative imports with `.js` extension used everywhere
+
+**Import Style:**
+- Named imports preferred: `import { existsSync, readFileSync } from 'fs'`
+- `import type` for type-only imports
+- Default imports only where required by external API
 
 ## Error Handling
 
-**Pattern: Try-Catch with Structured Responses:**
+**Primary Pattern:**
+All tool handlers use `toolError()` from `src/errors.ts`. This is **required** — tests enforce it by scanning source for ad-hoc `isError:` usage.
+
 ```typescript
-try {
-  // Operation logic
-  if (!condition) {
-    return this.createErrorResponse(
-      'User-facing error message',
-      ['Possible solution 1', 'Possible solution 2']
-    );
-  }
-  // Success logic
-  return { content: [...] };
+// Correct pattern: always use toolError()
+return toolError('Invalid path', [
+  'Provide valid paths without ".." or other potentially unsafe characters',
+]);
+```
+
+**Catch Block Pattern:**
+```typescript
 } catch (error: unknown) {
   const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-  return this.createErrorResponse(
-    `Failed to [operation]: ${errorMessage}`,
-    ['Ensure X is configured', 'Check Y is accessible']
-  );
+  return toolError(`Failed to create scene: ${errorMessage}`, [
+    'Ensure Godot is installed correctly',
+    'Check if the GODOT_PATH environment variable is set correctly',
+    'Verify the project path is accessible',
+  ]);
 }
 ```
 
-**Error Response Construction:**
-- Use `createErrorResponse(message, possibleSolutions)` method for consistency
-- Returns structured response with `content` array and `isError: true` flag
-- Includes actionable solutions array as secondary content block
-- Examples: `src/index.ts` lines 177-196, 964-1043
+**Error Response Shape:**
+- `toolError()` returns `{ content: [{ type: 'text', text: JSON.stringify({ error, suggestions }) }], isError: true }`
+- Always includes `suggestions` array even when empty
+- Logs to `console.error` (safe for stdio transport) — never `console.log`
 
-**Validation Errors:**
-- Input validation returns early with `createErrorResponse()`
-- Never throws; always returns error response object
-- Path validation uses dedicated `validatePath()` method (line 207)
-
-**Async Error Handling:**
-- Type-guard for unknown errors: `error instanceof Error ? error.message : 'Unknown error'`
-- Special handling for execFile errors: `if (error instanceof Error && 'stdout' in error && 'stderr' in error)`
-- Logs errors to stderr using `console.error()` with `[SERVER]` prefix
-
-**Logging Pattern:**
-- Debug logs use `logDebug()` method (line 168): writes to stderr with `[DEBUG]` prefix
-- Error logs use `console.error()` with context prefix: `[SERVER]`, `[MCP Error]`
-- No stdout logging for operational messages (only info in tool responses)
+**Stderr Inspection:**
+- After `executeOperation()`, check `stderr.includes('Failed to')` before assuming success
+- Non-zero exits are recoverable — `execFileAsync` returns stdout/stderr even on failure
 
 ## Logging
 
-**Framework:** console (built-in Node.js)
-
-**Debug Logging:**
-- Controlled by `DEBUG` environment variable (`process.env.DEBUG === 'true'`)
-- Uses `stderr` to avoid interfering with JSON-RPC communication (see line 167 comment)
-- Prefix: `[DEBUG]`
-- Called via `this.logDebug(message)` private method
-
-**Error Logging:**
-- Direct `console.error()` calls with context prefixes
-- Prefixes: `[SERVER]`, `[MCP Error]`, `[DEBUG]`
-- Examples: lines 155, 179, 336-337
+**Framework:** `console.error` only (stdout is the MCP transport channel — writing to it corrupts messages)
 
 **Patterns:**
+- Server events: `console.error('[SERVER] ...')`
+- Debug logs: `console.error('[DEBUG] ...')` — gated by `DEBUG_MODE` flag (env `DEBUG=true`)
+- MCP errors: `console.error('[MCP Error]', error)` via `server.server.onerror`
+- Process output: `console.error('[Godot stdout] ...')` / `console.error('[Godot stderr] ...')`
+- Never use `console.log` anywhere in source code
+
+**Debug Guard:**
 ```typescript
-// Debug logging (example from line 136)
-if (debugMode) console.error(`[DEBUG] Operations script path: ${this.operationsScriptPath}`);
+const DEBUG_MODE: boolean = process.env.DEBUG === 'true';
 
-// Error response logging (line 179)
-console.error(`[SERVER] Error response: ${message}`);
-
-// MCP error handler (line 155)
-this.server.onerror = (error) => console.error('[MCP Error]', error);
+function logDebug(message: string): void {
+  if (DEBUG_MODE) {
+    console.error(`[DEBUG] ${message}`);
+  }
+}
 ```
 
 ## Comments
 
 **When to Comment:**
-- JSDoc comments required for all interfaces and public methods
-- Inline comments for non-obvious logic or workarounds
-- Comments explain WHY not WHAT (code is self-documenting)
+- Every exported function has a JSDoc block
+- Private helpers have JSDoc blocks if their purpose is non-obvious
+- Module-level JSDoc at top of every file describing the domain
+- Inline comments for non-obvious constants: `/** 10 MB max buffer for Godot process output */`
+- Tool registration blocks labeled with their tool number: `// Tool 8: create_scene`
 
-**JSDoc/TSDoc Pattern:**
-- All interfaces documented: `/** Interface representing a running Godot process */`
-- All major methods documented with purpose and parameters
-- Format: `/** [Description]\n * @param [name] [description]\n * @returns [description] */`
-
-**Examples from codebase:**
+**JSDoc Style:**
 ```typescript
 /**
- * Interface representing a running Godot process
+ * Create a structured error response for a tool invocation.
+ *
+ * Logs to stderr (safe for stdio transport) and returns a JSON body
+ * that the LLM can parse for recovery suggestions.
  */
-interface GodotProcess {
-  process: any;
-  output: string[];
-  errors: string[];
-}
-
-/**
- * Log debug messages if debug mode is enabled
- * Using stderr instead of stdout to avoid interfering with JSON-RPC communication
- */
-private logDebug(message: string): void {
-  if (DEBUG_MODE) {
-    console.error(`[DEBUG] ${message}`);
-  }
-}
-
-/**
- * Validate if a Godot path is valid and executable
- */
-private async isValidGodotPath(path: string): Promise<boolean> {
-  // Check cache first
-  if (this.validatedPaths.has(path)) {
-    return this.validatedPaths.get(path)!;
-  }
-  // ... implementation
-}
+export function toolError(message: string, suggestions: string[] = []): ToolResult {
 ```
 
 ## Function Design
 
-**Size:** Functions range from 10-50 lines; handler functions longer due to parameter validation and error handling chains
+**Size:** Functions are focused — tool handlers follow a consistent ~30-line pattern; parser helpers are single-responsibility
 
 **Parameters:**
-- Explicit typed parameters preferred
-- Use object/interface parameters for multiple related values: `config?: GodotServerConfig`
-- Avoid long parameter lists; use `args: any` for tool handlers that normalize internally
+- Context (`ServerContext`) passed explicitly to all tool registration functions and `executeOperation`
+- Optional parameters use TypeScript optional syntax (`param?: string`) or default values (`suggestions: string[] = []`)
+- Zod-destructured parameters use snake_case from MCP input
 
 **Return Values:**
-- Async operations return `Promise<T>`
-- Error handling functions return union type with error responses: `Promise<any>` (catches both error and success)
-- Tool handlers return: `{ content: [...], isError?: boolean }`
-- Internal operations return specific types: `Promise<{ stdout: string; stderr: string }>`
-
-**Example function signature (line 474-475):**
-```typescript
-private async executeOperation(
-  operation: string,
-  params: OperationParams,
-  projectPath: string
-): Promise<{ stdout: string; stderr: string }>
-```
+- Tool handlers always return `{ content: Array<{ type: 'text'; text: string }> }` or `toolError(...)`
+- The `toolError` return type `ToolResult` satisfies the MCP SDK `CallToolResult` shape
+- Async functions return `Promise<T>` — all tool handlers are `async`
 
 ## Module Design
 
 **Exports:**
-- No explicit exports; single class `GodotServer` instantiated and server started
-- Entry point creates server instance and connects stdin/stdout (line 2196+)
-- Singleton pattern: single server instance manages all state
+- Tool modules export a single `register*Tools(server, ctx)` function
+- Parser modules export named parsing functions: `parseScene()`, `parseResource()`, `parseProjectSettings()`
+- Types defined in separate `*-types.ts` files alongside their parsers
+- `src/errors.ts` exports `toolError` and `ToolResult` — used uniformly across all tool modules
 
-**Class Organization:**
-- Single `GodotServer` class in `src/index.ts`
-- Private properties for state: `godotPath`, `activeProcess`, `server`
-- Private helper methods for internal logic: `detectGodotPath()`, `validatePath()`, `logDebug()`
-- Private handler methods for each tool: `handleLaunchEditor()`, `handleRunProject()`, etc.
-- Constructor takes optional `GodotServerConfig`
+**Barrel Files:**
+- None — direct imports throughout
 
-**Constructor Pattern (lines 100-157):**
+## Path Safety
+
+All user-supplied paths are validated with `validatePath()` before use:
+
 ```typescript
-constructor(config?: GodotServerConfig) {
-  this.server = new Server({...});
-  // Initialize from config
-  if (config) {
-    if (config.debugMode !== undefined) {
-      DEBUG_MODE = config.debugMode;
-    }
-    if (config.godotPath) {
-      if (!this.isValidGodotPathSync(this.godotPath)) {
-        console.warn(`[SERVER] Invalid custom Godot path provided: ${this.godotPath}`);
-      }
-    }
+export function validatePath(path: string): boolean {
+  if (!path || path.includes('..')) {
+    return false;
   }
-  // Setup handlers and error handling
-  this.setupToolHandlers();
-  this.server.onerror = (error) => console.error('[MCP Error]', error);
-  process.on('SIGINT', async () => { await this.cleanup(); });
+  return true;
 }
 ```
 
-## Type Safety
-
-**TypeScript Strict Mode:**
-- All TypeScript strict checks enabled: `"strict": true`
-- No implicit any allowed; handlers use `args: any` with explicit normalization
-- Union types preferred: `string | null`, `Promise<T>`
-- Type guards used for unknown types: `error instanceof Error`
-
-**Any Escapes:**
-- Handler `args: any` parameter normalized via `normalizeParameters()` (line 414)
-- Process objects typed as `any` due to Node.js spawn return type limitations (line 39)
-- Justified with JSDoc comments explaining the pattern
+All tool handlers call `validatePath()` as the first check, returning `toolError()` immediately on failure.
 
 ---
 
