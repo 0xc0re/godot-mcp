@@ -9,11 +9,10 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { join } from 'path';
-import { existsSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { resolveWithinProject, runOperation, validatePath } from '../godot.js';
+import { resolveWithinProject, runOperation } from '../godot.js';
 import { toolError } from '../errors.js';
+import { withProject, outsideProjectError, opSuccess } from './common.js';
 
 export function registerAnimationTools(server: McpServer, ctx: ServerContext): void {
   // Tool: create_animation
@@ -50,30 +49,14 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
           .describe('Array of tracks, each with a property path and keyframes'),
       },
     },
-    async ({ project_path, output_path, length, loop_mode, step, tracks }) => {
-      if (
-        !validatePath(project_path as string) ||
-        !validatePath(output_path as string)
-      ) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
-        if (resolveWithinProject(project_path as string, output_path as string) === null) {
-          return toolError('Invalid output_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+    withProject(
+      {
+        catchPrefix: 'Failed to create animation',
+        extraPaths: (a) => [a.output_path],
+      },
+      async ({ project_path, output_path, length, loop_mode, step, tracks }) => {
+        if (resolveWithinProject(project_path, output_path) === null) {
+          return outsideProjectError('output_path');
         }
 
         const params: Record<string, unknown> = {
@@ -85,12 +68,7 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
         if (loop_mode !== undefined) params.loopMode = loop_mode;
         if (step !== undefined) params.step = step;
 
-        const result = await runOperation(
-          ctx,
-          project_path as string,
-          'create_animation',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'create_animation', params);
 
         if (!result.ok) {
           return toolError(`Failed to create animation: ${result.error}`, [
@@ -99,23 +77,9 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Animation created at '${output_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to create animation: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(`Animation created at '${output_path}'`, result.data);
+      },
+    ),
   );
 
   // Tool: create_animation_library
@@ -135,30 +99,14 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
           .describe('Map of animation names to .tres file paths (e.g., {"walk": "animations/walk.tres"})'),
       },
     },
-    async ({ project_path, output_path, animations }) => {
-      if (
-        !validatePath(project_path as string) ||
-        !validatePath(output_path as string)
-      ) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
-        if (resolveWithinProject(project_path as string, output_path as string) === null) {
-          return toolError('Invalid output_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+    withProject(
+      {
+        catchPrefix: 'Failed to create animation library',
+        extraPaths: (a) => [a.output_path],
+      },
+      async ({ project_path, output_path, animations }) => {
+        if (resolveWithinProject(project_path, output_path) === null) {
+          return outsideProjectError('output_path');
         }
 
         const params = {
@@ -166,12 +114,7 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
           animations,
         };
 
-        const result = await runOperation(
-          ctx,
-          project_path as string,
-          'create_animation_library',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'create_animation_library', params);
 
         if (!result.ok) {
           return toolError(`Failed to create animation library: ${result.error}`, [
@@ -180,23 +123,9 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Animation library created at '${output_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to create animation library: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(`Animation library created at '${output_path}'`, result.data);
+      },
+    ),
   );
 
   // Tool: add_keyframes
@@ -227,30 +156,14 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
           .describe('Array of keyframes to add'),
       },
     },
-    async ({ project_path, animation_path, track_index, track_path, keyframes }) => {
-      if (
-        !validatePath(project_path as string) ||
-        !validatePath(animation_path as string)
-      ) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
-        if (resolveWithinProject(project_path as string, animation_path as string) === null) {
-          return toolError('Invalid animation_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+    withProject(
+      {
+        catchPrefix: 'Failed to add keyframes',
+        extraPaths: (a) => [a.animation_path],
+      },
+      async ({ project_path, animation_path, track_index, track_path, keyframes }) => {
+        if (resolveWithinProject(project_path, animation_path) === null) {
+          return outsideProjectError('animation_path');
         }
 
         const params: Record<string, unknown> = {
@@ -261,12 +174,7 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
         if (track_index !== undefined) params.trackIndex = track_index;
         if (track_path !== undefined) params.trackPath = track_path;
 
-        const result = await runOperation(
-          ctx,
-          project_path as string,
-          'add_keyframes',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'add_keyframes', params);
 
         if (!result.ok) {
           return toolError(`Failed to add keyframes: ${result.error}`, [
@@ -275,23 +183,9 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Keyframes added to '${animation_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to add keyframes: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(`Keyframes added to '${animation_path}'`, result.data);
+      },
+    ),
   );
 
   // Tool: assign_animation_library
@@ -317,38 +211,18 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
           .describe("Path to the AnimationLibrary .tres file (e.g., 'animations/library.tres')"),
       },
     },
-    async ({ project_path, scene_path, node_path, library_name, library_path }) => {
-      if (
-        !validatePath(project_path as string) ||
-        !validatePath(scene_path as string) ||
-        !validatePath(library_path as string)
-      ) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
+    withProject(
+      {
+        catchPrefix: 'Failed to assign animation library',
+        extraPaths: (a) => [a.scene_path, a.library_path],
+      },
+      async ({ project_path, scene_path, node_path, library_name, library_path }) => {
+        if (resolveWithinProject(project_path, scene_path) === null) {
+          return outsideProjectError('scene_path');
         }
 
-        if (resolveWithinProject(project_path as string, scene_path as string) === null) {
-          return toolError('Invalid scene_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
-        }
-
-        if (resolveWithinProject(project_path as string, library_path as string) === null) {
-          return toolError('Invalid library_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+        if (resolveWithinProject(project_path, library_path) === null) {
+          return outsideProjectError('library_path');
         }
 
         const params = {
@@ -358,12 +232,7 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
           libraryPath: library_path,
         };
 
-        const result = await runOperation(
-          ctx,
-          project_path as string,
-          'assign_animation_library',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'assign_animation_library', params);
 
         if (!result.ok) {
           return toolError(`Failed to assign animation library: ${result.error}`, [
@@ -372,22 +241,11 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Animation library '${library_name}' assigned to '${node_path}' in '${scene_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to assign animation library: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(
+          `Animation library '${library_name}' assigned to '${node_path}' in '${scene_path}'`,
+          result.data,
+        );
+      },
+    ),
   );
 }

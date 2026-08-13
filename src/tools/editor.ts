@@ -10,6 +10,7 @@ import { spawn } from 'child_process';
 import type { ServerContext } from '../types.js';
 import { validatePath, trackProcess, parseOperationOutput } from '../godot.js';
 import { toolError } from '../errors.js';
+import { withProject, textResult } from './common.js';
 
 /** 800KB threshold for screenshot resize (conservative limit under Claude Desktop's 1MB) */
 const SCREENSHOT_SIZE_THRESHOLD = 800 * 1024;
@@ -39,22 +40,11 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
         project_path: z.string().describe('Path to the Godot project directory'),
       },
     },
-    async ({ project_path }) => {
-      if (!validatePath(project_path)) {
-        return toolError('Invalid project path', [
-          'Provide a valid path without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to launch Godot editor',
+      },
+      async ({ project_path }) => {
         logDebug(`Launching Godot editor for project: ${project_path}`);
         const proc = trackProcess(
           ctx,
@@ -67,23 +57,11 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
           console.error('Failed to start Godot editor:', err);
         });
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Godot editor launched successfully for project at ${project_path}.`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to launch Godot editor: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return textResult(
+          `Godot editor launched successfully for project at ${project_path}.`,
+        );
+      },
+    ),
   );
 
   // Tool 2: run_project
@@ -97,22 +75,11 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
         scene: z.string().optional().describe('Optional: Specific scene to run'),
       },
     },
-    async ({ project_path, scene }) => {
-      if (!validatePath(project_path)) {
-        return toolError('Invalid project path', [
-          'Provide a valid path without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to run Godot project',
+      },
+      async ({ project_path, scene }) => {
         // Kill any existing active process
         if (ctx.activeProcess) {
           logDebug('Killing existing Godot process before starting a new one');
@@ -165,23 +132,11 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
 
         ctx.activeProcess = { process: proc, output, errors };
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Godot project started in debug mode. Use get_debug_output to see output.`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to run Godot project: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return textResult(
+          `Godot project started in debug mode. Use get_debug_output to see output.`,
+        );
+      },
+    ),
   );
 
   // Tool 3: get_debug_output

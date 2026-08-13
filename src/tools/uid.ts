@@ -4,11 +4,11 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { join } from 'path';
 import { existsSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { execGodot, runOperation, isGodot44OrLater, resolveWithinProject, validatePath } from '../godot.js';
+import { execGodot, runOperation, isGodot44OrLater, resolveWithinProject } from '../godot.js';
 import { toolError } from '../errors.js';
+import { withProject, outsideProjectError, opSuccess, textResult } from './common.js';
 
 export function registerUidTools(server: McpServer, ctx: ServerContext): void {
   // Tool 13: get_uid
@@ -27,28 +27,15 @@ export function registerUidTools(server: McpServer, ctx: ServerContext): void {
           ),
       },
     },
-    async ({ project_path, file_path }) => {
-      if (!validatePath(project_path) || !validatePath(file_path)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to get UID',
+        extraPaths: (a) => [a.file_path],
+      },
+      async ({ project_path, file_path }) => {
         const filePath = resolveWithinProject(project_path, file_path);
         if (filePath === null) {
-          return toolError('Invalid file_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('file_path');
         }
         if (!existsSync(filePath)) {
           return toolError(`File does not exist: ${file_path}`, [
@@ -88,23 +75,9 @@ export function registerUidTools(server: McpServer, ctx: ServerContext): void {
             ? `UID for ${file_path}: ${data.uid}`
             : `UID for ${file_path}: ${data?.message ?? 'UID not found'}`;
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to get UID: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return textResult(text);
+      },
+    ),
   );
 
   // Tool 14: update_project_uids
@@ -118,22 +91,11 @@ export function registerUidTools(server: McpServer, ctx: ServerContext): void {
         project_path: z.string().describe('Path to the Godot project directory'),
       },
     },
-    async ({ project_path }) => {
-      if (!validatePath(project_path)) {
-        return toolError('Invalid project path', [
-          'Provide a valid path without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to update project UIDs',
+      },
+      async ({ project_path }) => {
         // Check Godot version for UID support
         const { stdout: versionOutput } = await execGodot(ctx.godotPath, [
           '--version',
@@ -160,22 +122,8 @@ export function registerUidTools(server: McpServer, ctx: ServerContext): void {
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Project UIDs updated successfully.\n\nOutput: ${JSON.stringify(result.data ?? {}, null, 2)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to update project UIDs: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess('Project UIDs updated successfully.', result.data);
+      },
+    ),
   );
 }

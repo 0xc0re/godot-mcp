@@ -8,11 +8,11 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { join } from 'path';
 import { existsSync, readFileSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { resolveWithinProject, runOperation, validatePath } from '../godot.js';
+import { resolveWithinProject, runOperation } from '../godot.js';
 import { toolError } from '../errors.js';
+import { withProject, outsideProjectError, opSuccess, textResult } from './common.js';
 import { parseResource } from '../parsers/tscn-parser.js';
 
 export function registerResourceTools(server: McpServer, ctx: ServerContext): void {
@@ -32,28 +32,20 @@ export function registerResourceTools(server: McpServer, ctx: ServerContext): vo
           ),
       },
     },
-    async ({ project_path, resource_path }) => {
-      if (!validatePath(project_path) || !validatePath(resource_path)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to read resource',
+        catchSuggestions: [
+          'Ensure the resource file is a valid .tres file',
+          'Check if the file is not corrupted',
+          'Verify the resource path is correct',
+        ],
+        extraPaths: (a) => [a.resource_path],
+      },
+      async ({ project_path, resource_path }) => {
         const resourceFilePath = resolveWithinProject(project_path, resource_path);
         if (resourceFilePath === null) {
-          return toolError('Invalid resource_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('resource_path');
         }
         if (!existsSync(resourceFilePath)) {
           return toolError(`Resource file does not exist: ${resource_path}`, [
@@ -65,24 +57,9 @@ export function registerResourceTools(server: McpServer, ctx: ServerContext): vo
         const content = readFileSync(resourceFilePath, 'utf-8');
         const parsed = parseResource(content);
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(parsed, null, 2),
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to read resource: ${errorMessage}`, [
-          'Ensure the resource file is a valid .tres file',
-          'Check if the file is not corrupted',
-          'Verify the resource path is correct',
-        ]);
-      }
-    },
+        return textResult(JSON.stringify(parsed, null, 2));
+      },
+    ),
   );
 
   // create_resource tool (SCEN-05)
@@ -118,27 +95,14 @@ export function registerResourceTools(server: McpServer, ctx: ServerContext): vo
           ),
       },
     },
-    async ({ project_path, output_path, resource_type, properties, property_types }) => {
-      if (!validatePath(project_path) || !validatePath(output_path)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to create resource',
+        extraPaths: (a) => [a.output_path],
+      },
+      async ({ project_path, output_path, resource_type, properties, property_types }) => {
         if (resolveWithinProject(project_path, output_path) === null) {
-          return toolError('Invalid output_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('output_path');
         }
 
         const params: Record<string, unknown> = {
@@ -163,24 +127,12 @@ export function registerResourceTools(server: McpServer, ctx: ServerContext): vo
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Resource created successfully at: ${output_path}\nType: ${resource_type}\n\nOutput: ${JSON.stringify(result.data ?? {}, null, 2)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to create resource: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(
+          `Resource created successfully at: ${output_path}\nType: ${resource_type}`,
+          result.data,
+        );
+      },
+    ),
   );
 
   // modify_resource tool
@@ -210,28 +162,15 @@ export function registerResourceTools(server: McpServer, ctx: ServerContext): vo
           ),
       },
     },
-    async ({ project_path, resource_path, properties, property_types }) => {
-      if (!validatePath(project_path) || !validatePath(resource_path)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to modify resource',
+        extraPaths: (a) => [a.resource_path],
+      },
+      async ({ project_path, resource_path, properties, property_types }) => {
         const resourceFilePath = resolveWithinProject(project_path, resource_path);
         if (resourceFilePath === null) {
-          return toolError('Invalid resource_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('resource_path');
         }
         if (!existsSync(resourceFilePath)) {
           return toolError(`Resource file does not exist: ${resource_path}`, [
@@ -259,23 +198,8 @@ export function registerResourceTools(server: McpServer, ctx: ServerContext): vo
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Resource modified successfully: ${resource_path}\n\nOutput: ${JSON.stringify(result.data ?? {}, null, 2)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to modify resource: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(`Resource modified successfully: ${resource_path}`, result.data);
+      },
+    ),
   );
 }

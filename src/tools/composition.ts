@@ -9,11 +9,10 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { join } from 'path';
-import { existsSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { resolveWithinProject, runOperation, validatePath } from '../godot.js';
+import { resolveWithinProject, runOperation } from '../godot.js';
 import { toolError } from '../errors.js';
+import { withProject, outsideProjectError, opSuccess } from './common.js';
 
 export function registerCompositionTools(server: McpServer, ctx: ServerContext): void {
   // Tool: connect_signal
@@ -42,27 +41,14 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           .describe("Name of the method to call on the target node (e.g., '_on_button_pressed')"),
       },
     },
-    async ({ project_path, scene_path, source_node_path, signal_name, target_node_path, method_name }) => {
-      if (!validatePath(project_path) || !validatePath(scene_path)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to connect signal',
+        extraPaths: (a) => [a.scene_path],
+      },
+      async ({ project_path, scene_path, source_node_path, signal_name, target_node_path, method_name }) => {
         if (resolveWithinProject(project_path, scene_path) === null) {
-          return toolError('Invalid scene_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('scene_path');
         }
 
         const params = {
@@ -83,23 +69,12 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Signal '${signal_name}' connected from '${source_node_path}' to '${target_node_path}.${method_name}'\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to connect signal: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(
+          `Signal '${signal_name}' connected from '${source_node_path}' to '${target_node_path}.${method_name}'`,
+          result.data,
+        );
+      },
+    ),
   );
 
   // Tool: disconnect_signal
@@ -128,27 +103,14 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           .describe("Name of the method on the target node (e.g., '_on_button_pressed')"),
       },
     },
-    async ({ project_path, scene_path, source_node_path, signal_name, target_node_path, method_name }) => {
-      if (!validatePath(project_path) || !validatePath(scene_path)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to disconnect signal',
+        extraPaths: (a) => [a.scene_path],
+      },
+      async ({ project_path, scene_path, source_node_path, signal_name, target_node_path, method_name }) => {
         if (resolveWithinProject(project_path, scene_path) === null) {
-          return toolError('Invalid scene_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('scene_path');
         }
 
         const params = {
@@ -169,23 +131,12 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Signal '${signal_name}' disconnected from '${source_node_path}' to '${target_node_path}.${method_name}'\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to disconnect signal: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(
+          `Signal '${signal_name}' disconnected from '${source_node_path}' to '${target_node_path}.${method_name}'`,
+          result.data,
+        );
+      },
+    ),
   );
 
   // Tool: instance_scene
@@ -210,34 +161,18 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           .describe('Optional custom name for the instanced node'),
       },
     },
-    async ({ project_path, scene_path, child_scene_path, parent_node_path, node_name }) => {
-      if (!validatePath(project_path) || !validatePath(scene_path)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to instance scene',
+        extraPaths: (a) => [a.scene_path],
+      },
+      async ({ project_path, scene_path, child_scene_path, parent_node_path, node_name }) => {
         if (resolveWithinProject(project_path, scene_path) === null) {
-          return toolError('Invalid scene_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('scene_path');
         }
 
         if (resolveWithinProject(project_path, child_scene_path) === null) {
-          return toolError('Invalid child_scene_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('child_scene_path');
         }
 
         const params: Record<string, unknown> = {
@@ -260,23 +195,12 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Scene '${child_scene_path}' instanced under '${parent_node_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to instance scene: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(
+          `Scene '${child_scene_path}' instanced under '${parent_node_path}'`,
+          result.data,
+        );
+      },
+    ),
   );
 
   // Tool: batch_set_properties
@@ -302,22 +226,12 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           .describe('Array of property operations to apply'),
       },
     },
-    async ({ project_path, scene_path, operations }) => {
-      if (!validatePath(project_path) || !validatePath(scene_path)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to set properties',
+        extraPaths: (a) => [a.scene_path],
+      },
+      async ({ project_path, scene_path, operations }) => {
         // Belt-and-suspenders check (Zod .min(1) should handle this)
         const ops = operations as Array<Record<string, unknown>>;
         if (!ops || ops.length === 0) {
@@ -327,10 +241,7 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
         }
 
         if (resolveWithinProject(project_path, scene_path) === null) {
-          return toolError('Invalid scene_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('scene_path');
         }
 
         const params = {
@@ -348,23 +259,9 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Batch properties set on ${ops.length} operation(s)\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to set properties: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(`Batch properties set on ${ops.length} operation(s)`, result.data);
+      },
+    ),
   );
 
   // Tool: manage_groups
@@ -382,22 +279,12 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
         remove_groups: z.array(z.string()).optional().describe('Groups to remove the node from'),
       },
     },
-    async ({ project_path, scene_path, node_path, add_groups, remove_groups }) => {
-      if (!validatePath(project_path) || !validatePath(scene_path)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to manage groups',
+        extraPaths: (a) => [a.scene_path],
+      },
+      async ({ project_path, scene_path, node_path, add_groups, remove_groups }) => {
         // Validate at least one group operation is provided
         const addArr = add_groups as string[] | undefined;
         const removeArr = remove_groups as string[] | undefined;
@@ -412,10 +299,7 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
         }
 
         if (resolveWithinProject(project_path, scene_path) === null) {
-          return toolError('Invalid scene_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('scene_path');
         }
 
         const params: Record<string, unknown> = {
@@ -439,22 +323,8 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Groups updated for node '${node_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to manage groups: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(`Groups updated for node '${node_path}'`, result.data);
+      },
+    ),
   );
 }

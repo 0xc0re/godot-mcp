@@ -11,8 +11,9 @@ import { z } from 'zod';
 import { join } from 'path';
 import { existsSync, readFileSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { resolveWithinProject, runOperation, validatePath } from '../godot.js';
+import { resolveWithinProject, runOperation } from '../godot.js';
 import { toolError } from '../errors.js';
+import { withProject, outsideProjectError, opSuccess, textResult } from './common.js';
 import { parseProjectSettings } from '../parsers/project-parser.js';
 
 export function registerConfigTools(server: McpServer, ctx: ServerContext): void {
@@ -61,29 +62,18 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           .describe('Deadzone for the input action (default: 0.5)'),
       },
     },
-    async ({ project_path, action_name, events, deadzone }) => {
-      if (!validatePath(project_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to add input action',
+      },
+      async ({ project_path, action_name, events, deadzone }) => {
         const params = {
           actionName: action_name,
           events,
           deadzone: deadzone ?? 0.5,
         };
 
-        const result = await runOperation(ctx, project_path as string, 'add_input_action', params);
+        const result = await runOperation(ctx, project_path, 'add_input_action', params);
 
         if (!result.ok) {
           return toolError(`Failed to add input action: ${result.error}`, [
@@ -92,23 +82,9 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Input action '${action_name}' added successfully\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to add input action: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(`Input action '${action_name}' added successfully`, result.data);
+      },
+    ),
   );
 
   // Tool: remove_input_action
@@ -123,32 +99,16 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
         action_name: z.string().describe("Name of the input action to remove (e.g., 'jump')"),
       },
     },
-    async ({ project_path, action_name }) => {
-      if (!validatePath(project_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to remove input action',
+      },
+      async ({ project_path, action_name }) => {
         const params = {
           actionName: action_name,
         };
 
-        const result = await runOperation(
-          ctx,
-          project_path as string,
-          'remove_input_action',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'remove_input_action', params);
 
         if (!result.ok) {
           return toolError(`Failed to remove input action: ${result.error}`, [
@@ -157,23 +117,9 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Input action '${action_name}' removed successfully\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to remove input action: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(`Input action '${action_name}' removed successfully`, result.data);
+      },
+    ),
   );
 
   // Tool: list_input_actions
@@ -187,22 +133,16 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
         project_path: z.string().describe('Path to the Godot project directory'),
       },
     },
-    async ({ project_path }) => {
-      if (!validatePath(project_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to list input actions',
+        catchSuggestions: [
+          'Ensure the project.godot file is readable',
+          'Check if the project path is correct',
+        ],
+      },
+      async ({ project_path }) => {
+        const projectFile = join(project_path, 'project.godot');
         const content = readFileSync(projectFile, 'utf-8');
         const parsed = parseProjectSettings(content);
 
@@ -212,22 +152,9 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           raw_value: rawValue,
         }));
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify({ actions }),
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to list input actions: ${errorMessage}`, [
-          'Ensure the project.godot file is readable',
-          'Check if the project path is correct',
-        ]);
-      }
-    },
+        return textResult(JSON.stringify({ actions }));
+      },
+    ),
   );
 
   // ── Collision Layer Management ───────────────────────────────────────
@@ -248,22 +175,16 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           .describe('Physics type: "2d" or "3d" (default: "3d")'),
       },
     },
-    async ({ project_path, physics_type }) => {
-      if (!validatePath(project_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to get collision layer names',
+        catchSuggestions: [
+          'Ensure the project.godot file is readable',
+          'Check if the project path is correct',
+        ],
+      },
+      async ({ project_path, physics_type }) => {
+        const projectFile = join(project_path, 'project.godot');
         const content = readFileSync(projectFile, 'utf-8');
         const parsed = parseProjectSettings(content);
         const layerSection = parsed.sections['layer_names'] || {};
@@ -277,22 +198,9 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           }
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify({ physics_type, layers }),
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to get collision layer names: ${errorMessage}`, [
-          'Ensure the project.godot file is readable',
-          'Check if the project path is correct',
-        ]);
-      }
-    },
+        return textResult(JSON.stringify({ physics_type, layers }));
+      },
+    ),
   );
 
   // Tool: set_collision_layer_names
@@ -320,22 +228,15 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           .describe('Array of layer number to name mappings'),
       },
     },
-    async ({ project_path, physics_type, layers }) => {
-      if (!validatePath(project_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to set collision layer names',
+        catchSuggestions: [
+          'Ensure Godot is installed correctly',
+          'Check if the GODOT_PATH environment variable is set correctly',
+        ],
+      },
+      async ({ project_path, physics_type, layers }) => {
         const typedLayers = layers as Array<{ layer: number; name: string }>;
         const results: Array<{ layer: number; name: string; success: boolean }> = [];
 
@@ -343,7 +244,7 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           const key = `${physics_type as string}_physics/layer_${layer}`;
           const result = await runOperation(
             ctx,
-            project_path as string,
+            project_path,
             'modify_project_setting',
             { section: 'layer_names', key, value: name, action: 'set' },
           );
@@ -352,26 +253,15 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
         }
 
         const allSuccess = results.every((r) => r.success);
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify({
-                success: allSuccess,
-                physics_type,
-                layers_set: results,
-              }),
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to set collision layer names: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-        ]);
-      }
-    },
+        return textResult(
+          JSON.stringify({
+            success: allSuccess,
+            physics_type,
+            layers_set: results,
+          }),
+        );
+      },
+    ),
   );
 
   // Tool: set_node_collision
@@ -406,21 +296,16 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           .describe('Physics type for layer name lookup: "2d" or "3d" (default: "3d")'),
       },
     },
-    async ({ project_path, scene_path, node_path, collision_layer, collision_mask, physics_type }) => {
-      if (!validatePath(project_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
+    withProject(
+      {
+        catchPrefix: 'Failed to set node collision',
+        catchSuggestions: [
+          'Ensure Godot is installed correctly',
+          'Verify the scene and node paths are correct',
+        ],
+      },
+      async ({ project_path, scene_path, node_path, collision_layer, collision_mask, physics_type }) => {
+        const projectFile = join(project_path, 'project.godot');
 
         if (!collision_layer && !collision_mask) {
           return toolError('Must specify at least one of collision_layer or collision_mask', [
@@ -428,11 +313,8 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           ]);
         }
 
-        if (resolveWithinProject(project_path as string, scene_path as string) === null) {
-          return toolError('Invalid scene_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+        if (resolveWithinProject(project_path, scene_path as string) === null) {
+          return outsideProjectError('scene_path');
         }
 
         // Read layer name mappings from project.godot
@@ -476,7 +358,7 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           if (unresolved.length === 0) {
             const result = await runOperation(
               ctx,
-              project_path as string,
+              project_path,
               'modify_node_property',
               {
                 scenePath: scene_path,
@@ -497,7 +379,7 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           if (unresolved.length === 0) {
             const result = await runOperation(
               ctx,
-              project_path as string,
+              project_path,
               'modify_node_property',
               {
                 scenePath: scene_path,
@@ -522,25 +404,14 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           );
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify({
-                success: results.every((r) => r.success),
-                results,
-              }),
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to set node collision: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Verify the scene and node paths are correct',
-        ]);
-      }
-    },
+        return textResult(
+          JSON.stringify({
+            success: results.every((r) => r.success),
+            results,
+          }),
+        );
+      },
+    ),
   );
 
   // ── Autoload Singleton Management ────────────────────────────────────
@@ -556,22 +427,16 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
         project_path: z.string().describe('Path to the Godot project directory'),
       },
     },
-    async ({ project_path }) => {
-      if (!validatePath(project_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to list autoloads',
+        catchSuggestions: [
+          'Ensure the project.godot file is readable',
+          'Check if the project path is correct',
+        ],
+      },
+      async ({ project_path }) => {
+        const projectFile = join(project_path, 'project.godot');
         const content = readFileSync(projectFile, 'utf-8');
         const parsed = parseProjectSettings(content);
         const autoloadSection = parsed.sections['autoload'] || {};
@@ -583,22 +448,9 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           return { name, script_path: scriptPath, enabled };
         });
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify({ autoloads }),
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to list autoloads: ${errorMessage}`, [
-          'Ensure the project.godot file is readable',
-          'Check if the project path is correct',
-        ]);
-      }
-    },
+        return textResult(JSON.stringify({ autoloads }));
+      },
+    ),
   );
 
   // Tool: add_autoload
@@ -627,29 +479,19 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           .describe('Whether the autoload is enabled (default: true)'),
       },
     },
-    async ({ project_path, name, script_path, enabled }) => {
-      if (!validatePath(project_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to add autoload',
+        catchSuggestions: [
+          'Ensure Godot is installed correctly',
+          'Check if the GODOT_PATH environment variable is set correctly',
+        ],
+      },
+      async ({ project_path, name, script_path, enabled }) => {
         // Validate the script file stays inside the project and exists
-        const fullScriptPath = resolveWithinProject(project_path as string, script_path as string);
+        const fullScriptPath = resolveWithinProject(project_path, script_path as string);
         if (fullScriptPath === null) {
-          return toolError('Invalid script_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('script_path');
         }
         if (!existsSync(fullScriptPath)) {
           return toolError(`Script file not found: ${script_path}`, [
@@ -671,7 +513,7 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
 
         const result = await runOperation(
           ctx,
-          project_path as string,
+          project_path,
           'modify_project_setting',
           { section: 'autoload', key: name, value: resPath, action: 'set' },
         );
@@ -683,27 +525,16 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify({
-                success: true,
-                name,
-                script_path,
-                enabled: (enabled as boolean) !== false,
-              }),
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to add autoload: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-        ]);
-      }
-    },
+        return textResult(
+          JSON.stringify({
+            success: true,
+            name,
+            script_path,
+            enabled: (enabled as boolean) !== false,
+          }),
+        );
+      },
+    ),
   );
 
   // Tool: remove_autoload
@@ -718,25 +549,18 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
         name: z.string().describe('Autoload name to remove (e.g., "EventBus")'),
       },
     },
-    async ({ project_path, name }) => {
-      if (!validatePath(project_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to remove autoload',
+        catchSuggestions: [
+          'Ensure Godot is installed correctly',
+          'Check if the GODOT_PATH environment variable is set correctly',
+        ],
+      },
+      async ({ project_path, name }) => {
         const result = await runOperation(
           ctx,
-          project_path as string,
+          project_path,
           'modify_project_setting',
           { section: 'autoload', key: name, action: 'delete' },
         );
@@ -748,21 +572,8 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify({ success: true, name, action: 'removed' }),
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to remove autoload: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-        ]);
-      }
-    },
+        return textResult(JSON.stringify({ success: true, name, action: 'removed' }));
+      },
+    ),
   );
 }

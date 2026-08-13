@@ -9,11 +9,12 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { join, dirname } from 'path';
-import { existsSync, writeFileSync, mkdirSync } from 'fs';
+import { dirname } from 'path';
+import { writeFileSync, mkdirSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { resolveWithinProject, runOperation, validatePath } from '../godot.js';
+import { resolveWithinProject, runOperation } from '../godot.js';
 import { toolError } from '../errors.js';
+import { withProject, outsideProjectError, opSuccess, textResult } from './common.js';
 
 export function registerShaderTools(server: McpServer, ctx: ServerContext): void {
   // Tool: create_shader
@@ -36,22 +37,15 @@ export function registerShaderTools(server: McpServer, ctx: ServerContext): void
           .describe('Shader source code body (fragment/vertex/etc functions)'),
       },
     },
-    async ({ project_path, shader_path, shader_type, shader_code }) => {
-      if (!validatePath(project_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to create shader',
+        catchSuggestions: [
+          'Check that the project path is writable',
+          'Verify the shader path is valid',
+        ],
+      },
+      async ({ project_path, shader_path, shader_type, shader_code }) => {
         const shaderPathStr = shader_path as string;
         if (!shaderPathStr.endsWith('.gdshader')) {
           return toolError('Shader path must end with .gdshader', [
@@ -59,12 +53,9 @@ export function registerShaderTools(server: McpServer, ctx: ServerContext): void
           ]);
         }
 
-        const fullPath = resolveWithinProject(project_path as string, shaderPathStr);
+        const fullPath = resolveWithinProject(project_path, shaderPathStr);
         if (fullPath === null) {
-          return toolError('Invalid shader_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('shader_path');
         }
 
         const shaderSource = `shader_type ${shader_type};\n\n${shader_code}`;
@@ -72,22 +63,9 @@ export function registerShaderTools(server: McpServer, ctx: ServerContext): void
         mkdirSync(dirname(fullPath), { recursive: true });
         writeFileSync(fullPath, shaderSource, 'utf-8');
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify({ success: true, path: shaderPathStr }),
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to create shader: ${errorMessage}`, [
-          'Check that the project path is writable',
-          'Verify the shader path is valid',
-        ]);
-      }
-    },
+        return textResult(JSON.stringify({ success: true, path: shaderPathStr }));
+      },
+    ),
   );
 
   // Tool: create_shader_material
@@ -115,34 +93,17 @@ export function registerShaderTools(server: McpServer, ctx: ServerContext): void
           .describe('Type hints for shader parameters (e.g., {"color": "Color", "speed": "float"})'),
       },
     },
-    async ({ project_path, shader_path, output_path, shader_params, param_types }) => {
-      if (!validatePath(project_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
+    withProject(
+      {
+        catchPrefix: 'Failed to create shader material',
+      },
+      async ({ project_path, shader_path, output_path, shader_params, param_types }) => {
+        if (resolveWithinProject(project_path, shader_path as string) === null) {
+          return outsideProjectError('shader_path');
         }
 
-        if (resolveWithinProject(project_path as string, shader_path as string) === null) {
-          return toolError('Invalid shader_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
-        }
-
-        if (resolveWithinProject(project_path as string, output_path as string) === null) {
-          return toolError('Invalid output_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+        if (resolveWithinProject(project_path, output_path as string) === null) {
+          return outsideProjectError('output_path');
         }
 
         const params: Record<string, unknown> = {
@@ -157,12 +118,7 @@ export function registerShaderTools(server: McpServer, ctx: ServerContext): void
           params.paramTypes = param_types;
         }
 
-        const result = await runOperation(
-          ctx,
-          project_path as string,
-          'create_shader_material',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'create_shader_material', params);
 
         if (!result.ok) {
           return toolError(`Failed to create shader material: ${result.error}`, [
@@ -172,23 +128,9 @@ export function registerShaderTools(server: McpServer, ctx: ServerContext): void
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Shader material created at '${output_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to create shader material: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(`Shader material created at '${output_path}'`, result.data);
+      },
+    ),
   );
 
   // Tool: set_shader_params
@@ -212,27 +154,13 @@ export function registerShaderTools(server: McpServer, ctx: ServerContext): void
           .describe('Type hints for shader parameters (e.g., {"speed": "float"})'),
       },
     },
-    async ({ project_path, material_path, shader_params, param_types }) => {
-      if (!validatePath(project_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
-        if (resolveWithinProject(project_path as string, material_path as string) === null) {
-          return toolError('Invalid material_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+    withProject(
+      {
+        catchPrefix: 'Failed to set shader params',
+      },
+      async ({ project_path, material_path, shader_params, param_types }) => {
+        if (resolveWithinProject(project_path, material_path as string) === null) {
+          return outsideProjectError('material_path');
         }
 
         const params: Record<string, unknown> = {
@@ -244,12 +172,7 @@ export function registerShaderTools(server: McpServer, ctx: ServerContext): void
           params.paramTypes = param_types;
         }
 
-        const result = await runOperation(
-          ctx,
-          project_path as string,
-          'set_shader_params',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'set_shader_params', params);
 
         if (!result.ok) {
           return toolError(`Failed to set shader params: ${result.error}`, [
@@ -259,22 +182,8 @@ export function registerShaderTools(server: McpServer, ctx: ServerContext): void
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Shader parameters updated on '${material_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to set shader params: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(`Shader parameters updated on '${material_path}'`, result.data);
+      },
+    ),
   );
 }

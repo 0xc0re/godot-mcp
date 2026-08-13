@@ -8,11 +8,10 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { join } from 'path';
-import { existsSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { runOperation, validatePath } from '../godot.js';
+import { runOperation } from '../godot.js';
 import { toolError } from '../errors.js';
+import { withProject, textResult } from './common.js';
 
 /**
  * Find the bare JSON summary line an op printed to stdout.
@@ -97,22 +96,11 @@ export function registerScriptTools(server: McpServer, ctx: ServerContext): void
           ),
       },
     },
-    async ({ project_path, path_filter }) => {
-      if (!validatePath(project_path)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to validate scripts',
+      },
+      async ({ project_path, path_filter }) => {
         const params: Record<string, unknown> = {
           path_filter: path_filter || '',
         };
@@ -154,24 +142,9 @@ export function registerScriptTools(server: McpServer, ctx: ServerContext): void
           }
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to validate scripts: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return textResult(text);
+      },
+    ),
   );
 
   // list_scripts tool (SCRI-02)
@@ -191,27 +164,16 @@ export function registerScriptTools(server: McpServer, ctx: ServerContext): void
           ),
       },
     },
-    async ({ project_path, path_filter }) => {
-      if (!validatePath(project_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to list scripts',
+      },
+      async ({ project_path, path_filter }) => {
         const params: Record<string, unknown> = {
           path_filter: (path_filter as string) || '',
         };
 
-        const result = await runOperation(ctx, project_path as string, 'list_scripts', params);
+        const result = await runOperation(ctx, project_path, 'list_scripts', params);
 
         // list_scripts doesn't emit a success/error envelope, so parse the JSON
         // summary line out of stdout directly rather than relying on result.data.
@@ -248,24 +210,9 @@ export function registerScriptTools(server: McpServer, ctx: ServerContext): void
           text += `, ${script.signals.length} signal${script.signals.length !== 1 ? 's' : ''}`;
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to list scripts: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return textResult(text);
+      },
+    ),
   );
 
   // query_class tool (SCRI-04)
@@ -288,28 +235,17 @@ export function registerScriptTools(server: McpServer, ctx: ServerContext): void
           ),
       },
     },
-    async ({ project_path, class_name, no_inheritance }) => {
-      if (!validatePath(project_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to query class',
+      },
+      async ({ project_path, class_name, no_inheritance }) => {
         const params: Record<string, unknown> = {
           class_name: class_name as string,
           no_inheritance: (no_inheritance as boolean) || false,
         };
 
-        const result = await runOperation(ctx, project_path as string, 'query_class', params);
+        const result = await runOperation(ctx, project_path, 'query_class', params);
 
         if (!result.ok) {
           return toolError(`Failed to query class: ${result.error}`, [
@@ -332,23 +268,8 @@ export function registerScriptTools(server: McpServer, ctx: ServerContext): void
 
         const parsed = JSON.parse(jsonLine) as Record<string, unknown>;
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(parsed, null, 2),
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to query class: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return textResult(JSON.stringify(parsed, null, 2));
+      },
+    ),
   );
 }

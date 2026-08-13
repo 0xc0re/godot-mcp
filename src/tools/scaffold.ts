@@ -10,8 +10,9 @@ import { z } from 'zod';
 import { join, dirname } from 'path';
 import { existsSync, writeFileSync, mkdirSync, readFileSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { resolveWithinProject, runOperation, validatePath } from '../godot.js';
+import { resolveWithinProject, runOperation } from '../godot.js';
 import { toolError } from '../errors.js';
+import { withProject, outsideProjectError, textResult } from './common.js';
 
 /**
  * Convert a snake_case filename (without extension) to PascalCase.
@@ -79,22 +80,17 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
           ),
       },
     },
-    async ({ project_path, script_path, signals, register_autoload, autoload_name }) => {
-      if (!validatePath(project_path) || !validatePath(script_path)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to scaffold EventBus',
+        catchSuggestions: [
+          'Ensure the project path is accessible',
+          'Check that you have write permissions to the target directory',
+          'Verify the script_path ends with .gd',
+        ],
+        extraPaths: (a) => [a.script_path],
+      },
+      async ({ project_path, script_path, signals, register_autoload, autoload_name }) => {
         // Generate GDScript content
         const signalLines = signals.map((sig) => {
           if (sig.params.length === 0) {
@@ -119,10 +115,7 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
         // Resolve inside the project, then create parent directories if they don't exist
         const fullPath = resolveWithinProject(project_path, script_path);
         if (fullPath === null) {
-          return toolError('Invalid script_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('script_path');
         }
         const parentDir = dirname(fullPath);
         if (!existsSync(parentDir)) {
@@ -162,24 +155,9 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
           ...(autoloadRegistered ? { autoload_name: autoloadName } : {}),
         };
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to scaffold EventBus: ${errorMessage}`, [
-          'Ensure the project path is accessible',
-          'Check that you have write permissions to the target directory',
-          'Verify the script_path ends with .gd',
-        ]);
-      }
-    },
+        return textResult(JSON.stringify(result, null, 2));
+      },
+    ),
   );
 
   // scaffold_config_manager tool
@@ -227,22 +205,17 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
           ),
       },
     },
-    async ({ project_path, script_path, save_path, sections, register_autoload, autoload_name }) => {
-      if (!validatePath(project_path as string) || !validatePath(script_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path as string}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to scaffold ConfigManager',
+        catchSuggestions: [
+          'Ensure the project path is accessible',
+          'Check that you have write permissions to the target directory',
+          'Verify the script_path ends with .gd',
+        ],
+        extraPaths: (a) => [a.script_path],
+      },
+      async ({ project_path, script_path, save_path, sections, register_autoload, autoload_name }) => {
         // Flatten all fields from all sections for var declarations
         const allFields: { section: string; name: string; type: string; default: string }[] = [];
         for (const section of sections as { name: string; fields: { name: string; type: string; default: string }[] }[]) {
@@ -319,10 +292,7 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
         // Resolve inside the project, then create parent directories if they don't exist
         const fullPath = resolveWithinProject(project_path as string, script_path as string);
         if (fullPath === null) {
-          return toolError('Invalid script_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('script_path');
         }
         const parentDir = dirname(fullPath);
         if (!existsSync(parentDir)) {
@@ -364,24 +334,9 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
           ...(autoloadRegistered ? { autoload_name: resolvedAutoloadName } : {}),
         };
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to scaffold ConfigManager: ${errorMessage}`, [
-          'Ensure the project path is accessible',
-          'Check that you have write permissions to the target directory',
-          'Verify the script_path ends with .gd',
-        ]);
-      }
-    },
+        return textResult(JSON.stringify(result, null, 2));
+      },
+    ),
   );
 
   // scaffold_resource_class tool
@@ -413,22 +368,17 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
           .describe('Export fields with name, type, and optional default value'),
       },
     },
-    async ({ project_path, script_path, class_name, fields }) => {
-      if (!validatePath(project_path as string) || !validatePath(script_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path as string}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to scaffold Resource class',
+        catchSuggestions: [
+          'Ensure the project path is accessible',
+          'Check that you have write permissions to the target directory',
+          'Verify the script_path ends with .gd',
+        ],
+        extraPaths: (a) => [a.script_path],
+      },
+      async ({ project_path, script_path, class_name, fields }) => {
         // Generate @export lines
         const exportLines = (fields as { name: string; type: string; default?: string }[]).map((f) => {
           if (f.default !== undefined && f.default !== '') {
@@ -450,10 +400,7 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
         // Resolve inside the project, then create parent directories if they don't exist
         const fullPath = resolveWithinProject(project_path as string, script_path as string);
         if (fullPath === null) {
-          return toolError('Invalid script_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('script_path');
         }
         const parentDir = dirname(fullPath);
         if (!existsSync(parentDir)) {
@@ -470,24 +417,9 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
           field_count: (fields as { name: string }[]).length,
         };
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to scaffold Resource class: ${errorMessage}`, [
-          'Ensure the project path is accessible',
-          'Check that you have write permissions to the target directory',
-          'Verify the script_path ends with .gd',
-        ]);
-      }
-    },
+        return textResult(JSON.stringify(result, null, 2));
+      },
+    ),
   );
 
   // scaffold_tests tool
@@ -512,29 +444,21 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
           ),
       },
     },
-    async ({ project_path, script_path, test_path }) => {
-      if (!validatePath(project_path as string) || !validatePath(script_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path as string}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to scaffold tests',
+        catchSuggestions: [
+          'Ensure the project path is accessible',
+          'Check that the source script exists and is readable',
+          'Verify you have write permissions to the test directory',
+        ],
+        extraPaths: (a) => [a.script_path],
+      },
+      async ({ project_path, script_path, test_path }) => {
         // Read the source script (resolved inside the project)
         const sourceFullPath = resolveWithinProject(project_path as string, script_path as string);
         if (sourceFullPath === null) {
-          return toolError('Invalid script_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('script_path');
         }
         if (!existsSync(sourceFullPath)) {
           return toolError(`Source script not found: ${script_path as string}`, [
@@ -608,10 +532,7 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
         // Resolve inside the project, then create parent directories if they don't exist
         const fullPath = resolveWithinProject(project_path as string, resolvedTestPath);
         if (fullPath === null) {
-          return toolError('Invalid test_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('test_path');
         }
         const parentDir = dirname(fullPath);
         if (!existsSync(parentDir)) {
@@ -629,24 +550,9 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
           signal_assertions: signals.length,
         };
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to scaffold tests: ${errorMessage}`, [
-          'Ensure the project path is accessible',
-          'Check that the source script exists and is readable',
-          'Verify you have write permissions to the test directory',
-        ]);
-      }
-    },
+        return textResult(JSON.stringify(result, null, 2));
+      },
+    ),
   );
 
   // scaffold_health_component tool
@@ -676,22 +582,17 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
           .describe('Duration of invincibility frames in seconds (default: 0.3)'),
       },
     },
-    async ({ project_path, script_path, max_health, invincibility_duration }) => {
-      if (!validatePath(project_path as string) || !validatePath(script_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path as string}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to scaffold health component',
+        catchSuggestions: [
+          'Ensure the project path is accessible',
+          'Check that you have write permissions to the target directory',
+          'Verify the script_path ends with .gd',
+        ],
+        extraPaths: (a) => [a.script_path],
+      },
+      async ({ project_path, script_path, max_health, invincibility_duration }) => {
         const healthVal = (max_health as number) ?? 100;
         const invincVal = (invincibility_duration as number) ?? 0.3;
 
@@ -749,10 +650,7 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
         // Resolve inside the project, then create parent directories if they don't exist
         const fullPath = resolveWithinProject(project_path as string, script_path as string);
         if (fullPath === null) {
-          return toolError('Invalid script_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('script_path');
         }
         const parentDir = dirname(fullPath);
         if (!existsSync(parentDir)) {
@@ -769,23 +667,8 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
           invincibility_duration: invincVal,
         };
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to scaffold health component: ${errorMessage}`, [
-          'Ensure the project path is accessible',
-          'Check that you have write permissions to the target directory',
-          'Verify the script_path ends with .gd',
-        ]);
-      }
-    },
+        return textResult(JSON.stringify(result, null, 2));
+      },
+    ),
   );
 }

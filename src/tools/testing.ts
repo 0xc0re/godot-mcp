@@ -12,8 +12,9 @@ import { z } from 'zod';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { execGodot, validatePath } from '../godot.js';
+import { execGodot } from '../godot.js';
 import { toolError } from '../errors.js';
+import { withProject, textResult } from './common.js';
 
 export function registerTestingTools(server: McpServer, ctx: ServerContext): void {
   // Tool: run_tests
@@ -40,25 +41,20 @@ export function registerTestingTools(server: McpServer, ctx: ServerContext): voi
           .describe('Specific test function to run (GUT -gunit_test_name flag)'),
       },
     },
-    async ({ project_path, test_dir, test_file, test_name }) => {
-      if (!validatePath(project_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to run tests',
+        catchSuggestions: [
+          'Ensure Godot is installed correctly',
+          'Check if the GODOT_PATH environment variable is set correctly',
+          'Verify that GUT is properly installed in the project',
+          'For large test suites, the 120-second timeout may not be sufficient',
+        ],
+      },
+      async ({ project_path, test_dir, test_file, test_name }) => {
         // Pre-flight validation: GUT must be installed
         const gutScript = join(
-          project_path as string,
+          project_path,
           'addons',
           'gut',
           'gut_cmdln.gd',
@@ -75,7 +71,7 @@ export function registerTestingTools(server: McpServer, ctx: ServerContext): voi
         const args = [
           '--headless',
           '--path',
-          project_path as string,
+          project_path,
           '-s',
           'addons/gut/gut_cmdln.gd',
           '-gexit',
@@ -106,41 +102,23 @@ export function registerTestingTools(server: McpServer, ctx: ServerContext): voi
 
         // If we couldn't parse any counts, return raw output
         if (passed === null && failed === null && errors === null) {
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: JSON.stringify({
-                  warning: 'Could not parse test results from GUT output',
-                  output: stdout,
-                }),
-              },
-            ],
-          };
+          return textResult(
+            JSON.stringify({
+              warning: 'Could not parse test results from GUT output',
+              output: stdout,
+            }),
+          );
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify({
-                passed: passed ?? 0,
-                failed: failed ?? 0,
-                errors: errors ?? 0,
-                output: stdout,
-              }),
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to run tests: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify that GUT is properly installed in the project',
-          'For large test suites, the 120-second timeout may not be sufficient',
-        ]);
-      }
-    },
+        return textResult(
+          JSON.stringify({
+            passed: passed ?? 0,
+            failed: failed ?? 0,
+            errors: errors ?? 0,
+            output: stdout,
+          }),
+        );
+      },
+    ),
   );
 }

@@ -19,6 +19,7 @@ import { existsSync, readFileSync } from 'fs';
 import type { ServerContext } from '../types.js';
 import { execGodot, resolveWithinProject, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
+import { withProject, outsideProjectError, textResult } from './common.js';
 import { parseProjectSettings } from '../parsers/project-parser.js';
 
 /**
@@ -76,24 +77,18 @@ export function registerExportTools(server: McpServer, ctx: ServerContext): void
           .describe("Export mode: 'release' (default) or 'debug'"),
       },
     },
-    async ({ project_path, preset_name, output_path, mode }) => {
-      if (!validatePath(project_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Export failed',
+        catchSuggestions: [
+          'Ensure Godot is installed correctly',
+          'Check if the GODOT_PATH environment variable is set correctly',
+          'For large projects, the 180-second timeout may not be sufficient',
+        ],
+      },
+      async ({ project_path, preset_name, output_path, mode }) => {
         // Pre-flight validation: export_presets.cfg must exist (EXPT-02)
-        const cfgPath = join(project_path as string, 'export_presets.cfg');
+        const cfgPath = join(project_path, 'export_presets.cfg');
         if (!existsSync(cfgPath)) {
           return toolError('export_presets.cfg not found in project directory', [
             'Create export presets in the Godot editor: Project > Export > Add...',
@@ -102,7 +97,7 @@ export function registerExportTools(server: McpServer, ctx: ServerContext): void
         }
 
         // Pre-flight validation: preset name must exist in cfg (EXPT-02)
-        const presets = parseExportPresets(project_path as string);
+        const presets = parseExportPresets(project_path);
         const presetNames = presets.map((p) => p.name);
         if (!presetNames.includes(preset_name as string)) {
           return toolError(
@@ -115,12 +110,9 @@ export function registerExportTools(server: McpServer, ctx: ServerContext): void
         }
 
         // Resolve the output path inside the project before passing it to Godot
-        const fullOutputPath = resolveWithinProject(project_path as string, output_path as string);
+        const fullOutputPath = resolveWithinProject(project_path, output_path as string);
         if (fullOutputPath === null) {
-          return toolError('Invalid output_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('output_path');
         }
 
         // Build CLI args for Godot export
@@ -129,7 +121,7 @@ export function registerExportTools(server: McpServer, ctx: ServerContext): void
         const args = [
           '--headless',
           '--path',
-          project_path as string,
+          project_path,
           exportFlag,
           preset_name as string,
           fullOutputPath,
@@ -178,28 +170,16 @@ export function registerExportTools(server: McpServer, ctx: ServerContext): void
           }
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify({
-                success: true,
-                preset: preset_name,
-                output_path,
-                mode: (mode as string) || 'release',
-              }),
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Export failed: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'For large projects, the 180-second timeout may not be sufficient',
-        ]);
-      }
-    },
+        return textResult(
+          JSON.stringify({
+            success: true,
+            preset: preset_name,
+            output_path,
+            mode: (mode as string) || 'release',
+          }),
+        );
+      },
+    ),
   );
 
   // Tool: list_export_presets (EXPT-03)
@@ -265,22 +245,15 @@ export function registerExportTools(server: McpServer, ctx: ServerContext): void
           .describe("Target platform to check: 'android', 'ios', 'web', or 'all' (default)"),
       },
     },
-    async ({ project_path, platform }) => {
-      if (!validatePath(project_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Export readiness check failed',
+        catchSuggestions: [
+          'Ensure the project path is correct and project.godot is readable',
+        ],
+      },
+      async ({ project_path, platform }) => {
+        const projectFile = join(project_path, 'project.godot');
         const content = readFileSync(projectFile, 'utf-8');
         const parsed = parseProjectSettings(content);
         const targetPlatform = (platform as string) || 'all';
@@ -437,20 +410,8 @@ export function registerExportTools(server: McpServer, ctx: ServerContext): void
           fail: checks.filter((c) => c.status === 'fail').length,
         };
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify({ platform: targetPlatform, checks, summary }),
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Export readiness check failed: ${errorMessage}`, [
-          'Ensure the project path is correct and project.godot is readable',
-        ]);
-      }
-    },
+        return textResult(JSON.stringify({ platform: targetPlatform, checks, summary }));
+      },
+    ),
   );
 }

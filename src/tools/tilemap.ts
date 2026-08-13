@@ -9,11 +9,10 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { join } from 'path';
-import { existsSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { resolveWithinProject, runOperation, validatePath } from '../godot.js';
+import { resolveWithinProject, runOperation } from '../godot.js';
 import { toolError } from '../errors.js';
+import { withProject, outsideProjectError, opSuccess } from './common.js';
 
 export function registerTileMapTools(server: McpServer, ctx: ServerContext): void {
   // Tool: create_tileset
@@ -47,50 +46,30 @@ export function registerTileMapTools(server: McpServer, ctx: ServerContext): voi
         rows: z.number().optional().describe('Number of rows in the atlas (auto-calculated if omitted)'),
       },
     },
-    async ({
-      project_path,
-      output_path,
-      texture_path,
-      tile_width,
-      tile_height,
-      separation_x,
-      separation_y,
-      margin_x,
-      margin_y,
-      columns,
-      rows,
-    }) => {
-      if (
-        !validatePath(project_path as string) ||
-        !validatePath(output_path as string) ||
-        !validatePath(texture_path as string)
-      ) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
+    withProject(
+      {
+        catchPrefix: 'Failed to create tileset',
+        extraPaths: (a) => [a.output_path, a.texture_path],
+      },
+      async ({
+        project_path,
+        output_path,
+        texture_path,
+        tile_width,
+        tile_height,
+        separation_x,
+        separation_y,
+        margin_x,
+        margin_y,
+        columns,
+        rows,
+      }) => {
+        if (resolveWithinProject(project_path, output_path as string) === null) {
+          return outsideProjectError('output_path');
         }
 
-        if (resolveWithinProject(project_path as string, output_path as string) === null) {
-          return toolError('Invalid output_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
-        }
-
-        if (resolveWithinProject(project_path as string, texture_path as string) === null) {
-          return toolError('Invalid texture_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+        if (resolveWithinProject(project_path, texture_path as string) === null) {
+          return outsideProjectError('texture_path');
         }
 
         const params: Record<string, unknown> = {
@@ -111,12 +90,7 @@ export function registerTileMapTools(server: McpServer, ctx: ServerContext): voi
           params.rows = rows;
         }
 
-        const result = await runOperation(
-          ctx,
-          project_path as string,
-          'create_tileset',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'create_tileset', params);
 
         if (!result.ok) {
           return toolError(`Failed to create tileset: ${result.error}`, [
@@ -126,23 +100,9 @@ export function registerTileMapTools(server: McpServer, ctx: ServerContext): voi
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `TileSet created at '${output_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to create tileset: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(`TileSet created at '${output_path}'`, result.data);
+      },
+    ),
   );
 
   // Tool: paint_tilemap
@@ -177,41 +137,28 @@ export function registerTileMapTools(server: McpServer, ctx: ServerContext): voi
         alternative_tile: z.number().optional().describe('Alternative tile ID (default: 0)'),
       },
     },
-    async ({
-      project_path,
-      scene_path,
-      node_path,
-      mode,
-      cells,
-      x_start,
-      y_start,
-      x_end,
-      y_end,
-      source_id,
-      atlas_x,
-      atlas_y,
-      alternative_tile,
-    }) => {
-      if (!validatePath(project_path as string) || !validatePath(scene_path as string)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path as string, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
-        if (resolveWithinProject(project_path as string, scene_path as string) === null) {
-          return toolError('Invalid scene_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+    withProject(
+      {
+        catchPrefix: 'Failed to paint tilemap',
+        extraPaths: (a) => [a.scene_path],
+      },
+      async ({
+        project_path,
+        scene_path,
+        node_path,
+        mode,
+        cells,
+        x_start,
+        y_start,
+        x_end,
+        y_end,
+        source_id,
+        atlas_x,
+        atlas_y,
+        alternative_tile,
+      }) => {
+        if (resolveWithinProject(project_path, scene_path as string) === null) {
+          return outsideProjectError('scene_path');
         }
 
         const params: Record<string, unknown> = {
@@ -239,12 +186,7 @@ export function registerTileMapTools(server: McpServer, ctx: ServerContext): voi
           }
         }
 
-        const result = await runOperation(
-          ctx,
-          project_path as string,
-          'paint_tilemap',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'paint_tilemap', params);
 
         if (!result.ok) {
           return toolError(`Failed to paint tilemap: ${result.error}`, [
@@ -254,22 +196,8 @@ export function registerTileMapTools(server: McpServer, ctx: ServerContext): voi
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `TileMap ${mode} operation completed on '${node_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to paint tilemap: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(`TileMap ${mode} operation completed on '${node_path}'`, result.data);
+      },
+    ),
   );
 }

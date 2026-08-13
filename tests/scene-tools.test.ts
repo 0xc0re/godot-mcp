@@ -464,7 +464,7 @@ describe('Scene MCP Tools', () => {
       expect(result.isError).toBeUndefined();
       expect(result.content[0].type).toBe('text');
       expect(result.content[0].text).toContain('MeshLibrary exported successfully to: meshes.res');
-      expect(result.content[0].text).toContain('"item_count":3');
+      expect(result.content[0].text).toContain('"item_count": 3');
     });
 
     it('returns toolError when runOperation yields ok:false', async () => {

@@ -13,7 +13,7 @@ import { spawn } from 'child_process';
 import type { ServerContext } from '../types.js';
 import { validatePath, trackProcess } from '../godot.js';
 import { toolError } from '../errors.js';
-import { ensureProject } from './common.js';
+import { withProject, textResult } from './common.js';
 
 /** Relative path within project to the trigger file */
 const TRIGGER_PATH_SUFFIX = '.godot/runtime_trigger';
@@ -296,19 +296,17 @@ export function registerRuntimeTools(server: McpServer, ctx: ServerContext): voi
         scene: z.string().optional().describe('Optional: Specific scene to run after restart'),
       },
     },
-    async ({ project_path, scene }) => {
-      const projectError = ensureProject(project_path);
-      if (projectError) {
-        return projectError;
-      }
+    withProject(
+      {
+        catchPrefix: 'Failed to restart Godot project',
+      },
+      async ({ project_path, scene }) => {
+        if (!ctx.activeProcess) {
+          return toolError('No active Godot process to restart', [
+            'Use run_project to start a Godot project first',
+          ]);
+        }
 
-      if (!ctx.activeProcess) {
-        return toolError('No active Godot process to restart', [
-          'Use run_project to start a Godot project first',
-        ]);
-      }
-
-      try {
         // Kill existing process
         ctx.activeProcess.process.kill();
 
@@ -376,26 +374,14 @@ export function registerRuntimeTools(server: McpServer, ctx: ServerContext): voi
           });
         });
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify({
-                message: 'Project restarted successfully',
-                pid: proc.pid,
-                running: !proc.killed,
-              }),
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to restart Godot project: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return textResult(
+          JSON.stringify({
+            message: 'Project restarted successfully',
+            pid: proc.pid,
+            running: !proc.killed,
+          }),
+        );
+      },
+    ),
   );
 }

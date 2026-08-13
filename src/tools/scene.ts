@@ -5,11 +5,11 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { join } from 'path';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { resolveWithinProject, runOperation, validatePath } from '../godot.js';
+import { resolveWithinProject, runOperation } from '../godot.js';
 import { toolError } from '../errors.js';
+import { withProject, outsideProjectError, opSuccess, textResult } from './common.js';
 import { parseScene } from '../parsers/tscn-parser.js';
 import { addNodeToScene } from '../parsers/tscn-writer.js';
 
@@ -31,27 +31,14 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           .describe('Type of the root node (e.g., Node2D, Node3D)'),
       },
     },
-    async ({ project_path, scene_path, root_node_type }) => {
-      if (!validatePath(project_path) || !validatePath(scene_path)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to create scene',
+        extraPaths: (a) => [a.scene_path],
+      },
+      async ({ project_path, scene_path, root_node_type }) => {
         if (resolveWithinProject(project_path, scene_path) === null) {
-          return toolError('Invalid scene_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('scene_path');
         }
 
         const params = {
@@ -69,23 +56,9 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Scene created successfully at: ${scene_path}\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to create scene: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(`Scene created successfully at: ${scene_path}`, result.data);
+      },
+    ),
   );
 
   // Tool 9: add_node
@@ -111,35 +84,20 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           .describe('Optional properties to set on the node'),
       },
     },
-    async ({
-      project_path,
-      scene_path,
-      parent_node_path,
-      node_type,
-      node_name,
-      properties,
-    }) => {
-      if (!validatePath(project_path) || !validatePath(scene_path)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to add node',
+        catchSuggestions: [
+          'Ensure the scene file is a valid .tscn file',
+          'Check that the node type and name are valid',
+          'Verify the scene file is not corrupted',
+        ],
+        extraPaths: (a) => [a.scene_path],
+      },
+      async ({ project_path, scene_path, parent_node_path, node_type, node_name, properties }) => {
         const scenePath = resolveWithinProject(project_path, scene_path);
         if (scenePath === null) {
-          return toolError('Invalid scene_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('scene_path');
         }
         if (!existsSync(scenePath)) {
           return toolError(`Scene file does not exist: ${scene_path}`, [
@@ -159,23 +117,11 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
         });
         writeFileSync(scenePath, newContent, 'utf-8');
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Node '${node_name}' of type '${node_type}' added successfully to '${scene_path}'.`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to add node: ${errorMessage}`, [
-          'Ensure the scene file is a valid .tscn file',
-          'Check that the node type and name are valid',
-          'Verify the scene file is not corrupted',
-        ]);
-      }
-    },
+        return textResult(
+          `Node '${node_name}' of type '${node_type}' added successfully to '${scene_path}'.`,
+        );
+      },
+    ),
   );
 
   // Tool 10: load_sprite
@@ -195,33 +141,15 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           .describe('Path to the texture file (relative to project)'),
       },
     },
-    async ({ project_path, scene_path, node_path, texture_path }) => {
-      if (
-        !validatePath(project_path) ||
-        !validatePath(scene_path) ||
-        !validatePath(node_path) ||
-        !validatePath(texture_path)
-      ) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to load sprite',
+        extraPaths: (a) => [a.scene_path, a.node_path, a.texture_path],
+      },
+      async ({ project_path, scene_path, node_path, texture_path }) => {
         const sceneFilePath = resolveWithinProject(project_path, scene_path);
         if (sceneFilePath === null) {
-          return toolError('Invalid scene_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('scene_path');
         }
         if (!existsSync(sceneFilePath)) {
           return toolError(`Scene file does not exist: ${scene_path}`, [
@@ -232,10 +160,7 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
 
         const textureFilePath = resolveWithinProject(project_path, texture_path);
         if (textureFilePath === null) {
-          return toolError('Invalid texture_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('texture_path');
         }
         if (!existsSync(textureFilePath)) {
           return toolError(`Texture file does not exist: ${texture_path}`, [
@@ -260,23 +185,9 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Sprite loaded successfully with texture: ${texture_path}\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to load sprite: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(`Sprite loaded successfully with texture: ${texture_path}`, result.data);
+      },
+    ),
   );
 
   // Tool 11: export_mesh_library
@@ -299,32 +210,15 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ),
       },
     },
-    async ({ project_path, scene_path, output_path, mesh_item_names }) => {
-      if (
-        !validatePath(project_path) ||
-        !validatePath(scene_path) ||
-        !validatePath(output_path)
-      ) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to export mesh library',
+        extraPaths: (a) => [a.scene_path, a.output_path],
+      },
+      async ({ project_path, scene_path, output_path, mesh_item_names }) => {
         const sceneFilePath = resolveWithinProject(project_path, scene_path);
         if (sceneFilePath === null) {
-          return toolError('Invalid scene_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('scene_path');
         }
         if (!existsSync(sceneFilePath)) {
           return toolError(`Scene file does not exist: ${scene_path}`, [
@@ -334,10 +228,7 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
         }
 
         if (resolveWithinProject(project_path, output_path) === null) {
-          return toolError('Invalid output_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('output_path');
         }
 
         const params: Record<string, unknown> = {
@@ -359,23 +250,9 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `MeshLibrary exported successfully to: ${output_path}\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to export mesh library: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(`MeshLibrary exported successfully to: ${output_path}`, result.data);
+      },
+    ),
   );
 
   // Tool 12: save_scene
@@ -395,34 +272,15 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ),
       },
     },
-    async ({ project_path, scene_path, new_path }) => {
-      if (!validatePath(project_path) || !validatePath(scene_path)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      if (new_path && !validatePath(new_path)) {
-        return toolError('Invalid new path', [
-          'Provide a valid new path without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to save scene',
+        extraPaths: (a) => [a.scene_path, a.new_path],
+      },
+      async ({ project_path, scene_path, new_path }) => {
         const sceneFilePath = resolveWithinProject(project_path, scene_path);
         if (sceneFilePath === null) {
-          return toolError('Invalid scene_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('scene_path');
         }
         if (!existsSync(sceneFilePath)) {
           return toolError(`Scene file does not exist: ${scene_path}`, [
@@ -432,10 +290,7 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
         }
 
         if (new_path && resolveWithinProject(project_path, new_path) === null) {
-          return toolError('Invalid new_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('new_path');
         }
 
         const params: Record<string, unknown> = {
@@ -457,23 +312,9 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
         }
 
         const savePath = new_path || scene_path;
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Scene saved successfully to: ${savePath}\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to save scene: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(`Scene saved successfully to: ${savePath}`, result.data);
+      },
+    ),
   );
 
   // Tool 13: read_scene
@@ -492,28 +333,20 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ),
       },
     },
-    async ({ project_path, scene_path }) => {
-      if (!validatePath(project_path) || !validatePath(scene_path)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to read scene',
+        catchSuggestions: [
+          'Ensure the scene file is a valid .tscn file',
+          'Check if the file is not corrupted',
+          'Verify the scene path is correct',
+        ],
+        extraPaths: (a) => [a.scene_path],
+      },
+      async ({ project_path, scene_path }) => {
         const sceneFilePath = resolveWithinProject(project_path, scene_path);
         if (sceneFilePath === null) {
-          return toolError('Invalid scene_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('scene_path');
         }
         if (!existsSync(sceneFilePath)) {
           return toolError(`Scene file does not exist: ${scene_path}`, [
@@ -525,24 +358,9 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
         const content = readFileSync(sceneFilePath, 'utf-8');
         const parsed = parseScene(content);
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(parsed, null, 2),
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to read scene: ${errorMessage}`, [
-          'Ensure the scene file is a valid .tscn file',
-          'Check if the file is not corrupted',
-          'Verify the scene path is correct',
-        ]);
-      }
-    },
+        return textResult(JSON.stringify(parsed, null, 2));
+      },
+    ),
   );
 
   // Tool 14: modify_node_property
@@ -580,35 +398,15 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ),
       },
     },
-    async ({
-      project_path,
-      scene_path,
-      node_path,
-      property_name,
-      value,
-      value_type,
-    }) => {
-      if (!validatePath(project_path) || !validatePath(scene_path)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to modify node property',
+        extraPaths: (a) => [a.scene_path],
+      },
+      async ({ project_path, scene_path, node_path, property_name, value, value_type }) => {
         const sceneFilePath = resolveWithinProject(project_path, scene_path);
         if (sceneFilePath === null) {
-          return toolError('Invalid scene_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('scene_path');
         }
         if (!existsSync(sceneFilePath)) {
           return toolError(`Scene file does not exist: ${scene_path}`, [
@@ -635,24 +433,12 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Property '${property_name}' modified on node '${node_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to modify node property: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(
+          `Property '${property_name}' modified on node '${node_path}'`,
+          result.data,
+        );
+      },
+    ),
   );
 
   // Tool 15: remove_node
@@ -673,28 +459,15 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ),
       },
     },
-    async ({ project_path, scene_path, node_path }) => {
-      if (!validatePath(project_path) || !validatePath(scene_path)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to remove node',
+        extraPaths: (a) => [a.scene_path],
+      },
+      async ({ project_path, scene_path, node_path }) => {
         const sceneFilePath = resolveWithinProject(project_path, scene_path);
         if (sceneFilePath === null) {
-          return toolError('Invalid scene_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('scene_path');
         }
         if (!existsSync(sceneFilePath)) {
           return toolError(`Scene file does not exist: ${scene_path}`, [
@@ -718,24 +491,9 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Node '${node_path}' removed successfully\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to remove node: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(`Node '${node_path}' removed successfully`, result.data);
+      },
+    ),
   );
 
   // Tool 16: attach_script
@@ -759,32 +517,15 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ),
       },
     },
-    async ({ project_path, scene_path, node_path, script_path }) => {
-      if (
-        !validatePath(project_path) ||
-        !validatePath(scene_path) ||
-        !validatePath(script_path)
-      ) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
-        const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
-
+    withProject(
+      {
+        catchPrefix: 'Failed to attach script',
+        extraPaths: (a) => [a.scene_path, a.script_path],
+      },
+      async ({ project_path, scene_path, node_path, script_path }) => {
         const sceneFilePath = resolveWithinProject(project_path, scene_path);
         if (sceneFilePath === null) {
-          return toolError('Invalid scene_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('scene_path');
         }
         if (!existsSync(sceneFilePath)) {
           return toolError(`Scene file does not exist: ${scene_path}`, [
@@ -794,10 +535,7 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
         }
 
         if (resolveWithinProject(project_path, script_path) === null) {
-          return toolError('Invalid script_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('script_path');
         }
 
         const params = {
@@ -816,23 +554,8 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ]);
         }
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Script '${script_path}' attached to node '${node_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
-            },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to attach script: ${errorMessage}`, [
-          'Ensure Godot is installed correctly',
-          'Check if the GODOT_PATH environment variable is set correctly',
-          'Verify the project path is accessible',
-        ]);
-      }
-    },
+        return opSuccess(`Script '${script_path}' attached to node '${node_path}'`, result.data);
+      },
+    ),
   );
 }

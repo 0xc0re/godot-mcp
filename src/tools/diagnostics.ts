@@ -15,6 +15,7 @@ import { Socket } from 'net';
 import type { ServerContext } from '../types.js';
 import { resolveWithinProject, validatePath, trackProcess } from '../godot.js';
 import { toolError } from '../errors.js';
+import { withProject, outsideProjectError, textResult } from './common.js';
 import { LspClient } from '../lsp/client.js';
 import { parseScene } from '../parsers/tscn-parser.js';
 import { parseProjectSettings } from '../parsers/project-parser.js';
@@ -195,28 +196,22 @@ export function registerDiagnosticsTools(server: McpServer, ctx: ServerContext):
           ),
       },
     },
-    async ({ project_path, scene_path }) => {
-      if (!validatePath(project_path) || !validatePath(scene_path)) {
-        return toolError('Invalid path', [
-          'Provide valid paths without ".." or other potentially unsafe characters',
-        ]);
-      }
-
-      try {
+    withProject(
+      {
+        catchPrefix: 'Failed to validate scene',
+        catchSuggestions: [
+          'Ensure the scene file is a valid .tscn file',
+          'Check if the file is not corrupted',
+          'Verify the scene and project paths are correct',
+        ],
+        extraPaths: (a) => [a.scene_path],
+      },
+      async ({ project_path, scene_path }) => {
         const projectFile = join(project_path, 'project.godot');
-        if (!existsSync(projectFile)) {
-          return toolError(`Not a valid Godot project: ${project_path}`, [
-            'Ensure the path points to a directory containing a project.godot file',
-            'Use list_projects to find valid Godot projects',
-          ]);
-        }
 
         const sceneFilePath = resolveWithinProject(project_path, scene_path);
         if (sceneFilePath === null) {
-          return toolError('Invalid scene_path: path resolves outside the project directory', [
-            'Use a path relative to the project root',
-            'Do not use "..", absolute paths, or symlinks that escape the project',
-          ]);
+          return outsideProjectError('scene_path');
         }
         if (!existsSync(sceneFilePath)) {
           return toolError(`Scene file does not exist: ${scene_path}`, [
@@ -412,30 +407,18 @@ export function registerDiagnosticsTools(server: McpServer, ctx: ServerContext):
           info: issues.filter((i) => i.severity === 'info').length,
         };
 
-        return {
-          content: [
+        return textResult(
+          JSON.stringify(
             {
-              type: 'text' as const,
-              text: JSON.stringify(
-                {
-                  scene_path,
-                  issues,
-                  summary,
-                },
-                null,
-                2,
-              ),
+              scene_path,
+              issues,
+              summary,
             },
-          ],
-        };
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return toolError(`Failed to validate scene: ${errorMessage}`, [
-          'Ensure the scene file is a valid .tscn file',
-          'Check if the file is not corrupted',
-          'Verify the scene and project paths are correct',
-        ]);
-      }
-    },
+            null,
+            2,
+          ),
+        );
+      },
+    ),
   );
 }
