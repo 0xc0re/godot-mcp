@@ -75,6 +75,27 @@ describe('parseOperationOutput', () => {
     expect(result.error).toBe('Failed to save scene to disk');
   });
 
+  it('fails when exit is 0, there is no JSON, but stderr has a SCRIPT ERROR marker', () => {
+    // Real-world shape: an unhandled GDScript runtime error prints SCRIPT ERROR:
+    // to stderr but the process still exits 0 with no JSON verdict on stdout.
+    const stderr = [
+      "SCRIPT ERROR: Invalid access to property or key 'scene_path' on a base object of type 'Dictionary'.",
+      '          at: add_node (res://godot_operations.gd:407)',
+    ].join('\n');
+    const result = parseOperationOutput('[INFO] Executing operation: add_node', stderr, 0);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('SCRIPT ERROR:');
+  });
+
+  it('stays ok when exit is 0, no JSON, and stderr has engine warnings but no SCRIPT ERROR', () => {
+    const stderr = [
+      'WARNING: The variable "x" is declared but never used.',
+      'W 0:00:00:0000   UNUSED_VARIABLE: unused variable',
+    ].join('\n');
+    const result = parseOperationOutput('[INFO] Executing operation: add_node', stderr, 0);
+    expect(result.ok).toBe(true);
+  });
+
   it('is ok when exit is 0, there is no JSON, and stderr only has warnings', () => {
     const stderr = 'WARNING: deprecated call\nWARNING: another notice';
     const result = parseOperationOutput('', stderr, 0);

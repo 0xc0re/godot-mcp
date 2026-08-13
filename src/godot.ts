@@ -449,7 +449,7 @@ export function parseOperationOutput(
     if (!line) {
       continue;
     }
-    if (line.includes('[ERROR]') || line.includes('Failed to ')) {
+    if (line.includes('[ERROR]') || line.includes('SCRIPT ERROR:') || line.includes('Failed to ')) {
       return { ok: false, error: truncateError(line), stdout, stderr, exitCode };
     }
   }
