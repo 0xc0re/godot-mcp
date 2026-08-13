@@ -20,7 +20,6 @@ vi.mock('fs', async () => {
 // Mock godot module
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
-  executeOperation: vi.fn(),
   runOperation: vi.fn(),
 }));
 
@@ -33,7 +32,7 @@ vi.mock('../src/errors.js', () => ({
 }));
 
 import { existsSync } from 'fs';
-import { validatePath, executeOperation, runOperation } from '../src/godot.js';
+import { validatePath, runOperation } from '../src/godot.js';
 import { toolError } from '../src/errors.js';
 import { registerScriptTools } from '../src/tools/script.js';
 

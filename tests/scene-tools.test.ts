@@ -386,6 +386,9 @@ describe('Scene MCP Tools', () => {
         }),
       );
       expect(result.isError).toBeUndefined();
+      expect(result.content[0].type).toBe('text');
+      expect(result.content[0].text).toContain('Sprite loaded successfully');
+      expect(result.content[0].text).toContain('sprite.png');
     });
 
     it('returns toolError when runOperation yields ok:false', async () => {
@@ -459,6 +462,9 @@ describe('Scene MCP Tools', () => {
         expect.objectContaining({ scenePath: 'scenes/meshes.tscn', outputPath: 'meshes.res' }),
       );
       expect(result.isError).toBeUndefined();
+      expect(result.content[0].type).toBe('text');
+      expect(result.content[0].text).toContain('MeshLibrary exported successfully to: meshes.res');
+      expect(result.content[0].text).toContain('"item_count":3');
     });
 
     it('returns toolError when runOperation yields ok:false', async () => {
@@ -529,6 +535,8 @@ describe('Scene MCP Tools', () => {
         expect.objectContaining({ scenePath: 'scenes/main.tscn' }),
       );
       expect(result.isError).toBeUndefined();
+      expect(result.content[0].type).toBe('text');
+      expect(result.content[0].text).toContain('Scene saved successfully to: scenes/main.tscn');
     });
 
     it('returns toolError when runOperation yields ok:false', async () => {
@@ -586,14 +594,14 @@ describe('Scene MCP Tools', () => {
       });
 
       const handler = handlers.get('modify_node_property')!;
-      await handler({
+      const result = await handler({
         project_path: '/my/project',
         scene_path: 'scenes/main.tscn',
         node_path: 'root/Player',
         property_name: 'position',
         value: { x: 100, y: 200 },
         value_type: 'Vector2',
-      });
+      }) as { content: Array<{ type: string; text: string }>; isError?: boolean };
 
       expect(runOperation).toHaveBeenCalledWith(
         ctx,
@@ -606,6 +614,11 @@ describe('Scene MCP Tools', () => {
           value: { x: 100, y: 200 },
           valueType: 'Vector2',
         }),
+      );
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].type).toBe('text');
+      expect(result.content[0].text).toContain(
+        "Property 'position' modified on node 'root/Player'",
       );
     });
 
@@ -670,11 +683,11 @@ describe('Scene MCP Tools', () => {
       });
 
       const handler = handlers.get('remove_node')!;
-      await handler({
+      const result = await handler({
         project_path: '/my/project',
         scene_path: 'scenes/main.tscn',
         node_path: 'root/EnemySpawner',
-      });
+      }) as { content: Array<{ type: string; text: string }>; isError?: boolean };
 
       expect(runOperation).toHaveBeenCalledWith(
         ctx,
@@ -685,6 +698,9 @@ describe('Scene MCP Tools', () => {
           nodePath: 'root/EnemySpawner',
         }),
       );
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].type).toBe('text');
+      expect(result.content[0].text).toContain("Node 'root/EnemySpawner' removed successfully");
     });
 
     it('returns toolError when runOperation yields ok:false', async () => {
@@ -744,12 +760,12 @@ describe('Scene MCP Tools', () => {
       });
 
       const handler = handlers.get('attach_script')!;
-      await handler({
+      const result = await handler({
         project_path: '/my/project',
         scene_path: 'scenes/main.tscn',
         node_path: 'root/Player',
         script_path: 'scripts/player.gd',
-      });
+      }) as { content: Array<{ type: string; text: string }>; isError?: boolean };
 
       expect(runOperation).toHaveBeenCalledWith(
         ctx,
@@ -760,6 +776,11 @@ describe('Scene MCP Tools', () => {
           nodePath: 'root/Player',
           scriptPath: 'scripts/player.gd',
         }),
+      );
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].type).toBe('text');
+      expect(result.content[0].text).toContain(
+        "Script 'scripts/player.gd' attached to node 'root/Player'",
       );
     });
 

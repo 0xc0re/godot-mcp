@@ -29,7 +29,6 @@ vi.mock('../src/godot.js', () => ({
     if (stripped.startsWith('/') || stripped.split('/').includes('..')) return null;
     return `${projectRoot}/${stripped}`;
   }),
-  executeOperation: vi.fn(),
   runOperation: vi.fn(),
 }));
 
@@ -47,7 +46,7 @@ vi.mock('../src/errors.js', () => ({
 }));
 
 import { existsSync, readFileSync } from 'fs';
-import { validatePath, executeOperation, runOperation } from '../src/godot.js';
+import { validatePath, runOperation } from '../src/godot.js';
 import { parseResource } from '../src/parsers/tscn-parser.js';
 import { toolError } from '../src/errors.js';
 import { registerResourceTools } from '../src/tools/resource.js';
