@@ -21,7 +21,7 @@ npx vitest run --reporter=verbose  # Verbose output with test names
 
 CI (.github/workflows/ci.yml) runs typecheck → build → test on Node 20 and 22.
 
-**Stats:** 33 test files, 736 tests — all passing (derived 2026-08-13 from `npm test`)
+**Stats:** 34 test files, 815 tests — all passing (derived 2026-08-13 from `npm test`, post-Track-E)
 
 ## Test File Organization
 
@@ -33,7 +33,7 @@ CI (.github/workflows/ci.yml) runs typecheck → build → test on Node 20 and 2
 - `tests/{module-name}.test.ts` for unit/parser tests
 - `tests/fixtures/` for static test data files
 
-**Structure (33 files):**
+**Structure (34 files):**
 ```
 tests/
 ├── animation-tools.test.ts      # create_animation, add_keyframes, libraries
@@ -43,7 +43,8 @@ tests/
 ├── editor-tools.test.ts         # launch_editor, run/stop_project, get_debug_output
 ├── error-responses.test.ts      # toolError() contract + source conformance
 ├── export-tools.test.ts         # export_project, presets, readiness check
-├── helper-autoloads.test.ts     # runtime helper autoload auto-registration
+├── godot-log-parser.test.ts     # structured runtime log parser (live 4.7.1 fixtures)
+├── helper-autoloads.test.ts     # temporary helper injection lifecycle (inject/restore/self-heal)
 ├── integration.test.ts          # NO mocks: real validatePath + .tscn round-trip
 ├── lsp-client.test.ts           # LspClient TCP lifecycle
 ├── lsp-protocol.test.ts         # LSP framing encode/parse
@@ -55,7 +56,7 @@ tests/
 ├── resource-registration.test.ts # MCP resource templates (scene/script)
 ├── resource-tools.test.ts       # read/create/modify_resource
 ├── run-operation.test.ts        # parseOperationOutput three-tier verdicts
-├── runtime-tools.test.ts        # inspect_* file-polling IPC, restart_project
+├── runtime-tools.test.ts        # inspect_* IPC, restart_project, send_input, invoke_runtime, wait_for
 ├── scaffold-tools.test.ts       # scaffold generators + overwrite flag
 ├── scene-tools.test.ts          # Scene CRUD tools
 ├── screenshot-tools.test.ts     # capture_screenshot + resize
@@ -65,11 +66,11 @@ tests/
 ├── signal-handlers.test.ts      # SIGINT/SIGTERM source conformance
 ├── testing-tools.test.ts        # run_tests (GUT runner)
 ├── tilemap-tools.test.ts        # create_tileset, paint_tilemap
-├── tool-registration.test.ts    # registry smoke test: authoritative 65-tool roster
+├── tool-registration.test.ts    # registry smoke test: authoritative 68-tool roster
 ├── tscn-parser.test.ts          # .tscn/.tres file parser
 ├── tscn-writer.test.ts          # .tscn writer + escaping/injection guards
 ├── uid-tools.test.ts            # get_uid, update_project_uids
-└── fixtures/                    # sample.project.godot, sample.tres, sample.tscn
+└── fixtures/                    # sample.project.godot, sample.tres, sample.tscn, godot-log/
 ```
 
 ## Test Structure
@@ -368,4 +369,4 @@ expect(sceneCall![1]).toBeInstanceOf(ResourceTemplate);
 
 ---
 
-*Testing analysis: 2026-08-13 (v2.1-hardening Track D refresh; counts from `npm test`: 33 files / 736 tests)*
+*Testing analysis: 2026-08-13 (v2.1-hardening Track D refresh, updated after Track E; counts from `npm test`: 34 files / 815 tests)*

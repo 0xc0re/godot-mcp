@@ -6,7 +6,7 @@
 [![](https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white 'TypeScript')](https://www.typescriptlang.org/)
 [![](https://img.shields.io/badge/License-MIT-red.svg 'MIT License')](https://opensource.org/licenses/MIT)
 
-A Model Context Protocol (MCP) server for the Godot game engine: **65 tools across 16 domains** that let an AI assistant create, modify, run, debug, and export Godot 4.x projects.
+A Model Context Protocol (MCP) server for the Godot game engine: **68 tools across 16 domains** that let an AI assistant create, modify, run, debug, and export Godot 4.x projects.
 
 > This is a hardened fork of [Coding-Solo/godot-mcp](https://github.com/Coding-Solo/godot-mcp), maintained at [0xc0re/godot-mcp](https://github.com/0xc0re/godot-mcp). It extends the upstream server with a much larger tool surface, a test suite with CI, path-traversal hardening, and reliable failure reporting.
 
@@ -16,7 +16,7 @@ Godot MCP gives AI assistants (Claude Code, Cline, Cursor, and any other MCP cli
 
 ## Tool Catalog
 
-65 tools, grouped by source module (`src/tools/*.ts`). The authoritative roster is asserted by the registry smoke test in `tests/tool-registration.test.ts`.
+68 tools, grouped by source module (`src/tools/*.ts`). The authoritative roster is asserted by the registry smoke test in `tests/tool-registration.test.ts`.
 
 ### Editor & Process (`editor.ts`) — 5 tools
 
@@ -24,7 +24,7 @@ Godot MCP gives AI assistants (Claude Code, Cline, Cursor, and any other MCP cli
 |------|-------------|
 | `launch_editor` | Open the Godot editor for a project |
 | `run_project` | Run the project in debug mode and capture output (temporarily injects the runtime helper autoload — see [Runtime helper autoloads](#runtime-helper-autoloads)) |
-| `get_debug_output` | Return the running process's captured stdout/stderr (bounded to the most recent 1000 lines) |
+| `get_debug_output` | Return the running process's captured stdout/stderr (bounded to the most recent 1000 lines). Optional `since_line` cursor fetches only new lines (responses carry `next_line`/`total_lines`/`truncated`), and `format: "structured"` returns parsed entries (script_error / push_error / push_warning / print / engine, with script, line, and stack). Default `format: "text"` with no cursor is byte-for-byte the legacy shape |
 | `stop_project` | Stop the running project and return its final output |
 | `capture_screenshot` | Capture the running game's viewport as a base64 PNG (auto-resized to 960×540) |
 
@@ -138,7 +138,7 @@ Godot MCP gives AI assistants (Claude Code, Cline, Cursor, and any other MCP cli
 | `create_tileset` | Create a TileSet resource with a TileSetAtlasSource (texture + tile size) |
 | `paint_tilemap` | Paint, rectangle-fill, or clear cells on a TileMapLayer node |
 
-### Runtime Inspection (`runtime.ts`) — 4 tools
+### Runtime Interaction (`runtime.ts`) — 7 tools
 
 | Tool | Description |
 |------|-------------|
@@ -146,6 +146,9 @@ Godot MCP gives AI assistants (Claude Code, Cline, Cursor, and any other MCP cli
 | `inspect_node` | Property values of a node in the running game |
 | `inspect_group` | All members of a group in the running game |
 | `restart_project` | Stop-and-rerun cycle after script changes, with running confirmation |
+| `send_input` | Inject a parameterized input event into the running game: an InputMap action press/release, a key event, or a mouse button event (structured params only — no free-form event data). Works headless: events flow through the Input singleton (action states update, `_input` fires); only window-dependent behavior (focus, mouse capture, position hit-testing) is inert |
+| `invoke_runtime` | Call a method or set a property on a node in the running game — plain-identifier method + typed args array, or property path (e.g. `position:x`) + typed value; expression strings and script source are rejected by design (not an eval surface). `set_property` reads the value back as the engine accepted it |
+| `wait_for` | Poll the running game until a structured condition spec is true or a timeout elapses (replaces guess-timing sleeps): `node_exists`, `property` comparison (eq/ne/gt/lt/ge/le, optional float tolerance), `group_count`, or `elapsed_frames`. Returns the observed value and poll count |
 
 ### Testing (`testing.ts`) — 1 tool
 
@@ -294,7 +297,7 @@ All failure paths inside `godot_operations.gd` go through a shared `fail()` help
 
 ### Runtime helper autoloads
 
-The runtime inspection tools (`inspect_scene_tree`, `inspect_node`, `inspect_group`) and `capture_screenshot` talk to the running game through a single helper autoload (`RuntimeHelper`) using file-polling IPC. Screenshot capture is one more command on the same channel — there is no separate screenshot helper.
+The runtime interaction tools (`inspect_scene_tree`, `inspect_node`, `inspect_group`, `send_input`, `invoke_runtime`, `wait_for`) and `capture_screenshot` talk to the running game through a single helper autoload (`RuntimeHelper`) using file-polling IPC. Screenshot capture is one more command on the same channel — there is no separate screenshot helper.
 
 `run_project` (and `restart_project`) **temporarily injects this helper**: it copies `runtime_helper.gd` into `.godot/mcp/` inside your project (the `.godot/` directory is Godot's own cache territory and is never committed) and adds the `RuntimeHelper` autoload entry to `project.godot`. On `stop_project` — or when the game process exits or errors — the previous `project.godot` state is **restored automatically**: the entry is removed, or if your project already had its own `RuntimeHelper` autoload, that value is put back. No manual setup, no permanent footprint.
 
@@ -308,7 +311,7 @@ If you are upgrading from 0.1.x or scripting the server/CLI directly, note these
 
 - **Failures now exit 1.** Previously, many GDScript operations (`modify_node_property`, `remove_node`, `attach_script`, `save_scene`, `load_sprite`, `create_scene`, `add_node`, and others) reported failure only on stderr and exited 0 — some tools reported *success* on failed operations. All failure paths now print `{"success": false, "error": ...}` JSON and exit 1. Anything invoking `godot_operations.gd` directly and checking `$?` will now see failures it previously missed.
 - **`export_mesh_library` with no valid meshes now fails** (exit 1) instead of silently writing nothing and reporting success.
-- **`get_debug_output` is bounded**: it returns the most recent 1000 lines of output/errors rather than the full unbounded history.
+- **`get_debug_output` is bounded**: it returns the most recent 1000 lines of output/errors rather than the full unbounded history. New optional params are additive: `since_line` (incremental cursor; responses gain `next_line`/`total_lines`/`truncated`) and `format: "structured"` (parsed error/warning entries) — a call with neither returns the legacy shape byte-for-byte.
 - **`capture_screenshot`** resize now runs a static, packaged GDScript (`resize_image.gd`) instead of generating a temp script at runtime, and the runtime helper is injected temporarily on `run_project` (see above) instead of requiring manual autoload setup.
 - **Debug flags are opt-in**: the `--debug-godot` engine flag is only added when `GODOT_DEBUG=true` (it was previously always on), and server debug logging is gated by `LOG_LEVEL`/`DEBUG`.
 - **`save_scene` with `new_path: ""`** (empty string) now returns an `Invalid path` error instead of silently saving to the original path. Omit `new_path` entirely to save in place.
