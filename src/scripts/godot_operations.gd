@@ -1483,20 +1483,17 @@ func modify_project_setting(params):
     var action = params.get("action", "set")
 
     if section == "":
-        log_error("Missing required parameter: section")
-        print(JSON.stringify({"success": false, "error": "Missing required parameter: section"}))
+        fail("Missing required parameter: section")
         return
 
     if key == "":
-        log_error("Missing required parameter: key")
-        print(JSON.stringify({"success": false, "error": "Missing required parameter: key"}))
+        fail("Missing required parameter: key")
         return
 
     var config = ConfigFile.new()
     var err = config.load("res://project.godot")
     if err != OK:
-        log_error("Failed to load project.godot: error code " + str(err))
-        print(JSON.stringify({"success": false, "error": "Failed to load project.godot: error code " + str(err)}))
+        fail("Failed to load project.godot: error code " + str(err))
         return
 
     if action == "delete":
@@ -1508,8 +1505,7 @@ func modify_project_setting(params):
 
     err = config.save("res://project.godot")
     if err != OK:
-        log_error("Failed to save project.godot: error code " + str(err))
-        print(JSON.stringify({"success": false, "error": "Failed to save project.godot: error code " + str(err)}))
+        fail("Failed to save project.godot: error code " + str(err))
         return
 
     print(JSON.stringify({
@@ -1595,13 +1591,11 @@ func query_class(params):
     var no_inheritance = params.get("no_inheritance", false)
 
     if class_name_param == "":
-        log_error("Missing required parameter: class_name")
-        print(JSON.stringify({"error": "Missing required parameter: class_name"}))
+        fail("Missing required parameter: class_name")
         return
 
     if not ClassDB.class_exists(class_name_param):
-        log_error("Class does not exist: " + class_name_param)
-        print(JSON.stringify({"error": "Class does not exist: " + class_name_param}))
+        fail("Class does not exist: " + class_name_param)
         return
 
     var parent_class = ClassDB.get_parent_class(class_name_param)
@@ -1661,29 +1655,29 @@ func connect_signal(params):
     # Load the scene
     var scene = load(full_scene_path)
     if not scene:
-        log_error("Failed to load scene: " + full_scene_path)
-        quit(1)
+        fail("Failed to load scene: " + full_scene_path)
+        return
 
     var scene_root = scene.instantiate()
 
     # Find source and target nodes
     var source = find_node_by_path(scene_root, params.source_node_path)
     if not source:
-        log_error("Source node not found: " + params.source_node_path)
-        quit(1)
+        fail("Source node not found: " + params.source_node_path)
+        return
 
     var target = find_node_by_path(scene_root, params.target_node_path)
     if not target:
-        log_error("Target node not found: " + params.target_node_path)
-        quit(1)
+        fail("Target node not found: " + params.target_node_path)
+        return
 
     # Verify signal exists on source node
     if not source.has_signal(params.signal_name):
         var available_signals = []
         for sig in source.get_signal_list():
             available_signals.append(sig["name"])
-        log_error("Signal '" + params.signal_name + "' does not exist on node. Available signals: " + str(available_signals))
-        quit(1)
+        fail("Signal '" + params.signal_name + "' does not exist on node. Available signals: " + str(available_signals))
+        return
 
     # Connect with CONNECT_PERSIST flag (value 2) for .tscn serialization
     source[params.signal_name].connect(Callable(target, params.method_name), CONNECT_PERSIST)
@@ -1692,13 +1686,13 @@ func connect_signal(params):
     var packed_scene = PackedScene.new()
     var result = packed_scene.pack(scene_root)
     if result != OK:
-        log_error("Failed to pack scene after connecting signal: " + str(result))
-        quit(1)
+        fail("Failed to pack scene after connecting signal: " + str(result))
+        return
 
     var save_error = ResourceSaver.save(packed_scene, full_scene_path)
     if save_error != OK:
-        log_error("Failed to save scene: " + str(save_error))
-        quit(1)
+        fail("Failed to save scene: " + str(save_error))
+        return
 
     print(JSON.stringify({
         "success": true,
@@ -1717,26 +1711,26 @@ func disconnect_signal(params):
     # Load the scene
     var scene = load(full_scene_path)
     if not scene:
-        log_error("Failed to load scene: " + full_scene_path)
-        quit(1)
+        fail("Failed to load scene: " + full_scene_path)
+        return
 
     var scene_root = scene.instantiate()
 
     # Find source and target nodes
     var source = find_node_by_path(scene_root, params.source_node_path)
     if not source:
-        log_error("Source node not found: " + params.source_node_path)
-        quit(1)
+        fail("Source node not found: " + params.source_node_path)
+        return
 
     var target = find_node_by_path(scene_root, params.target_node_path)
     if not target:
-        log_error("Target node not found: " + params.target_node_path)
-        quit(1)
+        fail("Target node not found: " + params.target_node_path)
+        return
 
     # Check connection exists
     if not source.is_connected(params.signal_name, Callable(target, params.method_name)):
-        log_error("Signal not connected: " + params.signal_name + " from " + params.source_node_path + " to " + params.target_node_path + "::" + params.method_name)
-        quit(1)
+        fail("Signal not connected: " + params.signal_name + " from " + params.source_node_path + " to " + params.target_node_path + "::" + params.method_name)
+        return
 
     # Disconnect the signal
     source.disconnect(params.signal_name, Callable(target, params.method_name))
@@ -1745,13 +1739,13 @@ func disconnect_signal(params):
     var packed_scene = PackedScene.new()
     var result = packed_scene.pack(scene_root)
     if result != OK:
-        log_error("Failed to pack scene after disconnecting signal: " + str(result))
-        quit(1)
+        fail("Failed to pack scene after disconnecting signal: " + str(result))
+        return
 
     var save_error = ResourceSaver.save(packed_scene, full_scene_path)
     if save_error != OK:
-        log_error("Failed to save scene: " + str(save_error))
-        quit(1)
+        fail("Failed to save scene: " + str(save_error))
+        return
 
     print(JSON.stringify({
         "success": true,
@@ -1767,22 +1761,22 @@ func instance_scene(params):
     # Load the parent scene
     var scene = load(full_scene_path)
     if not scene:
-        log_error("Failed to load scene: " + full_scene_path)
-        quit(1)
+        fail("Failed to load scene: " + full_scene_path)
+        return
 
     var scene_root = scene.instantiate()
 
     # Find parent node
     var parent = find_node_by_path(scene_root, params.parent_node_path)
     if not parent:
-        log_error("Parent node not found: " + params.parent_node_path)
-        quit(1)
+        fail("Parent node not found: " + params.parent_node_path)
+        return
 
     # Load child scene
     var child_packed = load(ensure_res_prefix(params.child_scene_path)) as PackedScene
     if not child_packed:
-        log_error("Failed to load child scene: " + params.child_scene_path)
-        quit(1)
+        fail("Failed to load child scene: " + params.child_scene_path)
+        return
 
     var child_instance = child_packed.instantiate()
 
@@ -1800,13 +1794,13 @@ func instance_scene(params):
     var packed_scene = PackedScene.new()
     var result = packed_scene.pack(scene_root)
     if result != OK:
-        log_error("Failed to pack scene after instancing: " + str(result))
-        quit(1)
+        fail("Failed to pack scene after instancing: " + str(result))
+        return
 
     var save_error = ResourceSaver.save(packed_scene, full_scene_path)
     if save_error != OK:
-        log_error("Failed to save scene: " + str(save_error))
-        quit(1)
+        fail("Failed to save scene: " + str(save_error))
+        return
 
     print(JSON.stringify({
         "success": true,
@@ -1824,8 +1818,8 @@ func batch_set_properties(params):
     # Load the scene
     var scene = load(full_scene_path)
     if not scene:
-        log_error("Failed to load scene: " + full_scene_path)
-        quit(1)
+        fail("Failed to load scene: " + full_scene_path)
+        return
 
     var scene_root = scene.instantiate()
 
@@ -1835,8 +1829,8 @@ func batch_set_properties(params):
     for op in operations:
         var target = find_node_by_path(scene_root, op.node_path)
         if not target:
-            log_error("Node not found during validation: " + op.node_path)
-            quit(1)
+            fail("Node not found during validation: " + op.node_path)
+            return
 
     # Apply pass: set properties on each node
     for op in operations:
@@ -1849,13 +1843,13 @@ func batch_set_properties(params):
     var packed_scene = PackedScene.new()
     var result = packed_scene.pack(scene_root)
     if result != OK:
-        log_error("Failed to pack scene after batch property set: " + str(result))
-        quit(1)
+        fail("Failed to pack scene after batch property set: " + str(result))
+        return
 
     var save_error = ResourceSaver.save(packed_scene, full_scene_path)
     if save_error != OK:
-        log_error("Failed to save scene: " + str(save_error))
-        quit(1)
+        fail("Failed to save scene: " + str(save_error))
+        return
 
     print(JSON.stringify({
         "success": true,
@@ -1871,16 +1865,16 @@ func manage_groups(params):
     # Load the scene
     var scene = load(full_scene_path)
     if not scene:
-        log_error("Failed to load scene: " + full_scene_path)
-        quit(1)
+        fail("Failed to load scene: " + full_scene_path)
+        return
 
     var scene_root = scene.instantiate()
 
     # Find target node
     var target = find_node_by_path(scene_root, params.node_path)
     if not target:
-        log_error("Node not found: " + params.node_path)
-        quit(1)
+        fail("Node not found: " + params.node_path)
+        return
 
     # Add groups (persistent = true for pack/save survival)
     if params.has("add_groups"):
@@ -1896,13 +1890,13 @@ func manage_groups(params):
     var packed_scene = PackedScene.new()
     var result = packed_scene.pack(scene_root)
     if result != OK:
-        log_error("Failed to pack scene after group management: " + str(result))
-        quit(1)
+        fail("Failed to pack scene after group management: " + str(result))
+        return
 
     var save_error = ResourceSaver.save(packed_scene, full_scene_path)
     if save_error != OK:
-        log_error("Failed to save scene: " + str(save_error))
-        quit(1)
+        fail("Failed to save scene: " + str(save_error))
+        return
 
     print(JSON.stringify({
         "success": true,
@@ -1914,8 +1908,7 @@ func manage_groups(params):
 func add_input_action(params):
     var action_name = params.get("action_name", "")
     if action_name == "":
-        log_error("Missing required parameter: action_name")
-        print(JSON.stringify({"success": false, "error": "Missing required parameter: action_name"}))
+        fail("Missing required parameter: action_name")
         return
 
     var events_data = params.get("events", [])
@@ -1946,15 +1939,13 @@ func add_input_action(params):
                 motion_event.axis_value = float(event_data.get("axis_value", 1.0))
                 events_array.append(motion_event)
             _:
-                log_error("Unknown event type: " + event_type)
-                print(JSON.stringify({"success": false, "error": "Unknown event type: " + event_type}))
+                fail("Unknown event type: " + event_type)
                 return
 
     ProjectSettings.set_setting("input/" + action_name, {"deadzone": deadzone, "events": events_array})
     var save_err = ProjectSettings.save()
     if save_err != OK:
-        log_error("Failed to save ProjectSettings: " + str(save_err))
-        print(JSON.stringify({"success": false, "error": "Failed to save ProjectSettings: " + str(save_err)}))
+        fail("Failed to save ProjectSettings: " + str(save_err))
         return
 
     print(JSON.stringify({"success": true, "action": action_name, "event_count": events_array.size()}))
@@ -1963,22 +1954,19 @@ func add_input_action(params):
 func remove_input_action(params):
     var action_name = params.get("action_name", "")
     if action_name == "":
-        log_error("Missing required parameter: action_name")
-        print(JSON.stringify({"success": false, "error": "Missing required parameter: action_name"}))
+        fail("Missing required parameter: action_name")
         return
 
     log_info("Removing input action: " + action_name)
 
     if not ProjectSettings.has_setting("input/" + action_name):
-        log_error("Input action not found: " + action_name)
-        print(JSON.stringify({"success": false, "error": "Input action not found: " + action_name}))
+        fail("Input action not found: " + action_name)
         return
 
     ProjectSettings.set_setting("input/" + action_name, null)
     var save_err = ProjectSettings.save()
     if save_err != OK:
-        log_error("Failed to save ProjectSettings: " + str(save_err))
-        print(JSON.stringify({"success": false, "error": "Failed to save ProjectSettings: " + str(save_err)}))
+        fail("Failed to save ProjectSettings: " + str(save_err))
         return
 
     print(JSON.stringify({"success": true, "action": action_name}))
@@ -1991,16 +1979,14 @@ func create_shader_material(params):
     var param_types = params.get("param_types", {})
 
     if shader_path == "res://" or output_path == "res://":
-        log_error("Missing required parameters: shader_path and output_path")
-        print(JSON.stringify({"success": false, "error": "Missing required parameters: shader_path and output_path"}))
+        fail("Missing required parameters: shader_path and output_path")
         return
 
     log_info("Creating shader material from: " + shader_path + " to: " + output_path)
 
     var shader = load(shader_path) as Shader
     if shader == null:
-        log_error("Failed to load shader: " + shader_path)
-        print(JSON.stringify({"success": false, "error": "Failed to load shader: " + shader_path}))
+        fail("Failed to load shader: " + shader_path)
         return
 
     var material = ShaderMaterial.new()
@@ -2022,8 +2008,7 @@ func create_shader_material(params):
 
     var error = ResourceSaver.save(material, output_path)
     if error != OK:
-        log_error("Failed to save shader material: " + str(error))
-        print(JSON.stringify({"success": false, "error": "Failed to save shader material: " + str(error)}))
+        fail("Failed to save shader material: " + str(error))
         return
 
     print(JSON.stringify({"success": true, "path": output_path}))
@@ -2035,16 +2020,14 @@ func set_shader_params(params):
     var param_types = params.get("param_types", {})
 
     if material_path == "res://":
-        log_error("Missing required parameter: material_path")
-        print(JSON.stringify({"success": false, "error": "Missing required parameter: material_path"}))
+        fail("Missing required parameter: material_path")
         return
 
     log_info("Setting shader params on: " + material_path)
 
     var material = load(material_path) as ShaderMaterial
     if material == null:
-        log_error("Failed to load ShaderMaterial: " + material_path)
-        print(JSON.stringify({"success": false, "error": "Failed to load ShaderMaterial: " + material_path}))
+        fail("Failed to load ShaderMaterial: " + material_path)
         return
 
     var count = 0
@@ -2056,8 +2039,7 @@ func set_shader_params(params):
 
     var error = ResourceSaver.save(material, material_path)
     if error != OK:
-        log_error("Failed to save shader material: " + str(error))
-        print(JSON.stringify({"success": false, "error": "Failed to save shader material: " + str(error)}))
+        fail("Failed to save shader material: " + str(error))
         return
 
     print(JSON.stringify({"success": true, "path": material_path, "params_set": count}))
@@ -2071,8 +2053,7 @@ func create_animation(params):
     var tracks = params.get("tracks", [])
 
     if output_path == "res://":
-        log_error("Missing required parameter: output_path")
-        print(JSON.stringify({"success": false, "error": "Missing required parameter: output_path"}))
+        fail("Missing required parameter: output_path")
         return
 
     log_info("Creating animation: " + output_path)
@@ -2113,8 +2094,7 @@ func create_animation(params):
 
     var error = ResourceSaver.save(anim, output_path)
     if error != OK:
-        log_error("Failed to save animation: " + str(error))
-        print(JSON.stringify({"success": false, "error": "Failed to save animation: " + str(error)}))
+        fail("Failed to save animation: " + str(error))
         return
 
     print(JSON.stringify({"success": true, "path": output_path, "track_count": anim.get_track_count()}))
@@ -2125,8 +2105,7 @@ func create_animation_library(params):
     var animations = params.get("animations", {})
 
     if output_path == "res://":
-        log_error("Missing required parameter: output_path")
-        print(JSON.stringify({"success": false, "error": "Missing required parameter: output_path"}))
+        fail("Missing required parameter: output_path")
         return
 
     log_info("Creating animation library: " + output_path)
@@ -2138,8 +2117,7 @@ func create_animation_library(params):
         var anim_path = ensure_res_prefix(animations[anim_name])
         var anim = load(anim_path) as Animation
         if anim == null:
-            log_error("Failed to load animation: " + anim_path)
-            print(JSON.stringify({"success": false, "error": "Failed to load animation: " + anim_path}))
+            fail("Failed to load animation: " + anim_path)
             return
         library.add_animation(anim_name, anim)
         count += 1
@@ -2155,8 +2133,7 @@ func create_animation_library(params):
 
     var error = ResourceSaver.save(library, output_path)
     if error != OK:
-        log_error("Failed to save animation library: " + str(error))
-        print(JSON.stringify({"success": false, "error": "Failed to save animation library: " + str(error)}))
+        fail("Failed to save animation library: " + str(error))
         return
 
     print(JSON.stringify({"success": true, "path": output_path, "animation_count": count}))
@@ -2169,16 +2146,14 @@ func add_keyframes(params):
     var keyframes = params.get("keyframes", [])
 
     if animation_path == "res://":
-        log_error("Missing required parameter: animation_path")
-        print(JSON.stringify({"success": false, "error": "Missing required parameter: animation_path"}))
+        fail("Missing required parameter: animation_path")
         return
 
     log_info("Adding keyframes to animation: " + animation_path)
 
     var anim = load(animation_path) as Animation
     if anim == null:
-        log_error("Failed to load animation: " + animation_path)
-        print(JSON.stringify({"success": false, "error": "Failed to load animation: " + animation_path}))
+        fail("Failed to load animation: " + animation_path)
         return
 
     # Resolve track index
@@ -2191,8 +2166,7 @@ func add_keyframes(params):
                 break
 
     if resolved_idx < 0 or resolved_idx >= anim.get_track_count():
-        log_error("Track not found. Index: " + str(track_index) + ", Path: " + track_path)
-        print(JSON.stringify({"success": false, "error": "Track not found. Index: " + str(track_index) + ", Path: " + track_path}))
+        fail("Track not found. Index: " + str(track_index) + ", Path: " + track_path)
         return
 
     # Insert keyframes
@@ -2206,8 +2180,7 @@ func add_keyframes(params):
 
     var error = ResourceSaver.save(anim, animation_path)
     if error != OK:
-        log_error("Failed to save animation: " + str(error))
-        print(JSON.stringify({"success": false, "error": "Failed to save animation: " + str(error)}))
+        fail("Failed to save animation: " + str(error))
         return
 
     print(JSON.stringify({"success": true, "path": animation_path, "keyframes_added": count}))
@@ -2220,8 +2193,7 @@ func assign_animation_library(params):
     var library_path = ensure_res_prefix(params.get("library_path", ""))
 
     if scene_path == "res://" or library_path == "res://":
-        log_error("Missing required parameters: scene_path and library_path")
-        print(JSON.stringify({"success": false, "error": "Missing required parameters: scene_path and library_path"}))
+        fail("Missing required parameters: scene_path and library_path")
         return
 
     log_info("Assigning animation library to scene: " + scene_path)
@@ -2229,8 +2201,7 @@ func assign_animation_library(params):
     # Load the scene
     var scene = load(scene_path)
     if not scene:
-        log_error("Failed to load scene: " + scene_path)
-        print(JSON.stringify({"success": false, "error": "Failed to load scene: " + scene_path}))
+        fail("Failed to load scene: " + scene_path)
         return
 
     var scene_root = scene.instantiate()
@@ -2238,20 +2209,17 @@ func assign_animation_library(params):
     # Find the AnimationPlayer node
     var target = find_node_by_path(scene_root, node_path)
     if not target:
-        log_error("Node not found: " + node_path)
-        print(JSON.stringify({"success": false, "error": "Node not found: " + node_path}))
+        fail("Node not found: " + node_path)
         return
 
     if not target is AnimationPlayer:
-        log_error("Target node is not an AnimationPlayer: " + node_path)
-        print(JSON.stringify({"success": false, "error": "Target node is not an AnimationPlayer: " + node_path}))
+        fail("Target node is not an AnimationPlayer: " + node_path)
         return
 
     # Load the animation library
     var library = load(library_path) as AnimationLibrary
     if library == null:
-        log_error("Failed to load animation library: " + library_path)
-        print(JSON.stringify({"success": false, "error": "Failed to load animation library: " + library_path}))
+        fail("Failed to load animation library: " + library_path)
         return
 
     # Add the library to the AnimationPlayer
@@ -2261,14 +2229,12 @@ func assign_animation_library(params):
     var packed_scene = PackedScene.new()
     var result = packed_scene.pack(scene_root)
     if result != OK:
-        log_error("Failed to pack scene after assigning animation library: " + str(result))
-        print(JSON.stringify({"success": false, "error": "Failed to pack scene: " + str(result)}))
+        fail("Failed to pack scene after assigning animation library: " + str(result))
         return
 
     var save_error = ResourceSaver.save(packed_scene, scene_path)
     if save_error != OK:
-        log_error("Failed to save scene: " + str(save_error))
-        print(JSON.stringify({"success": false, "error": "Failed to save scene: " + str(save_error)}))
+        fail("Failed to save scene: " + str(save_error))
         return
 
     print(JSON.stringify({"success": true, "library_name": library_name, "scene_path": scene_path}))
@@ -2288,8 +2254,7 @@ func create_tileset(params):
     var is_headless = DisplayServer.get_name() == "headless"
 
     if output_path == "res://" or texture_path == "res://":
-        log_error("Missing required parameters: output_path and texture_path")
-        print(JSON.stringify({"success": false, "error": "Missing required parameters: output_path and texture_path"}))
+        fail("Missing required parameters: output_path and texture_path")
         return
 
     log_info("Creating tileset: " + output_path)
@@ -2300,8 +2265,7 @@ func create_tileset(params):
         var err_msg = "Failed to load texture: " + texture_path
         if is_headless:
             err_msg = "Failed to load texture in headless mode: " + texture_path + ". Textures may not load without a display server. Provide explicit 'columns' and 'rows' parameters to skip texture size detection."
-        log_error(err_msg)
-        print(JSON.stringify({"success": false, "error": err_msg}))
+        fail(err_msg)
         return
 
     # Create TileSet
@@ -2331,16 +2295,14 @@ func create_tileset(params):
             var size_err = "Texture has zero size and no columns/rows provided"
             if is_headless:
                 size_err = "Texture has zero size in headless mode. Provide explicit 'columns' and 'rows' parameters to bypass texture size detection."
-            log_error(size_err)
-            print(JSON.stringify({"success": false, "error": size_err}))
+            fail(size_err)
             return
         # Calculate from texture size accounting for margins and separation
         grid_w = int((tex_size.x - margin_x * 2 + separation_x) / (tile_width + separation_x))
         grid_h = int((tex_size.y - margin_y * 2 + separation_y) / (tile_height + separation_y))
 
     if grid_w <= 0 or grid_h <= 0:
-        log_error("Calculated grid size is zero or negative: " + str(grid_w) + "x" + str(grid_h))
-        print(JSON.stringify({"success": false, "error": "Calculated grid size is zero or negative"}))
+        fail("Calculated grid size is zero or negative: " + str(grid_w) + "x" + str(grid_h))
         return
 
     # Create tiles in grid
@@ -2361,8 +2323,7 @@ func create_tileset(params):
 
     var error = ResourceSaver.save(tileset, output_path)
     if error != OK:
-        log_error("Failed to save tileset: " + str(error))
-        print(JSON.stringify({"success": false, "error": "Failed to save tileset: " + str(error)}))
+        fail("Failed to save tileset: " + str(error))
         return
 
     var result = {"success": true, "path": output_path, "source_id": source_id, "grid_size": {"x": grid_w, "y": grid_h}, "tile_count": grid_w * grid_h}
@@ -2377,8 +2338,7 @@ func paint_tilemap(params):
     var mode = params.get("mode", "paint")
 
     if scene_path == "res://":
-        log_error("Missing required parameter: scene_path")
-        print(JSON.stringify({"success": false, "error": "Missing required parameter: scene_path"}))
+        fail("Missing required parameter: scene_path")
         return
 
     log_info("Painting tilemap in scene: " + scene_path + " mode: " + mode)
@@ -2386,8 +2346,7 @@ func paint_tilemap(params):
     # Load the scene
     var scene = load(scene_path)
     if not scene:
-        log_error("Failed to load scene: " + scene_path)
-        print(JSON.stringify({"success": false, "error": "Failed to load scene: " + scene_path}))
+        fail("Failed to load scene: " + scene_path)
         return
 
     var scene_root = scene.instantiate()
@@ -2395,13 +2354,11 @@ func paint_tilemap(params):
     # Find the TileMapLayer node
     var target = find_node_by_path(scene_root, node_path)
     if not target:
-        log_error("Node not found: " + node_path)
-        print(JSON.stringify({"success": false, "error": "Node not found: " + node_path}))
+        fail("Node not found: " + node_path)
         return
 
     if not target is TileMapLayer:
-        log_error("Target node is not a TileMapLayer: " + node_path)
-        print(JSON.stringify({"success": false, "error": "Target node is not a TileMapLayer: " + node_path}))
+        fail("Target node is not a TileMapLayer: " + node_path)
         return
 
     var result_json = {}
@@ -2444,22 +2401,19 @@ func paint_tilemap(params):
                 result_json = {"success": true, "cleared": cells.size()}
 
         _:
-            log_error("Unknown paint_tilemap mode: " + mode)
-            print(JSON.stringify({"success": false, "error": "Unknown mode: " + mode}))
+            fail("Unknown paint_tilemap mode: " + mode)
             return
 
     # Pack and save scene
     var packed_scene = PackedScene.new()
     var pack_result = packed_scene.pack(scene_root)
     if pack_result != OK:
-        log_error("Failed to pack scene after painting tilemap: " + str(pack_result))
-        print(JSON.stringify({"success": false, "error": "Failed to pack scene: " + str(pack_result)}))
+        fail("Failed to pack scene after painting tilemap: " + str(pack_result))
         return
 
     var save_error = ResourceSaver.save(packed_scene, scene_path)
     if save_error != OK:
-        log_error("Failed to save scene: " + str(save_error))
-        print(JSON.stringify({"success": false, "error": "Failed to save scene: " + str(save_error)}))
+        fail("Failed to save scene: " + str(save_error))
         return
 
     print(JSON.stringify(result_json))
