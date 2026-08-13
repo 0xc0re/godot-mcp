@@ -1,5 +1,6 @@
 import { ChildProcess } from 'child_process';
 import type { LspClient } from './lsp/client.js';
+import type { HelperInjection } from './helper-autoloads.js';
 
 /**
  * Interface representing a running Godot process
@@ -23,6 +24,11 @@ export interface ServerContext {
   lspClient?: LspClient;
   /** Headless Godot editor process spawned for LSP, if any */
   lspProcess?: ChildProcess;
+  /**
+   * Restoration record for the temporarily injected RuntimeHelper autoload
+   * (see helper-autoloads.ts). Non-null only while an injection is live.
+   */
+  helperInjection?: HelperInjection | null;
 }
 
 /**

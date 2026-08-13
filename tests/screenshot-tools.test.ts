@@ -1,7 +1,11 @@
 /**
  * Tests for capture_screenshot MCP tool.
  *
- * Uses vi.mock() to isolate tool logic from filesystem and Godot process.
+ * Screenshot capture routes through the shared RuntimeHelper IPC channel
+ * (triggerAndPoll): a JSON command trigger at .godot/runtime_trigger, a JSON
+ * response at .godot/runtime_result.json, and the PNG itself at
+ * .godot/screenshot.png. Uses vi.mock() to isolate tool logic from
+ * filesystem and Godot process.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -97,6 +101,30 @@ function createMockProcess(): ChildProcess {
 }
 
 /**
+ * Path-keyed fs mocks for a successful IPC screenshot round-trip: the
+ * RuntimeHelper "responds" on .godot/runtime_result.json and the PNG exists
+ * at .godot/screenshot.png.
+ */
+function mockIpcScreenshotSuccess(pngData: Buffer): void {
+  vi.mocked(existsSync).mockImplementation((path: string | unknown) => {
+    const p = String(path);
+    if (p.endsWith('project.godot')) return true;
+    if (p.endsWith('runtime_result.json')) return true;
+    if (p.endsWith('screenshot.png')) return true;
+    return false;
+  });
+  vi.mocked(writeFileSync).mockReturnValue(undefined);
+  vi.mocked(readFileSync).mockImplementation(((path: string | unknown) => {
+    const p = String(path);
+    if (p.endsWith('runtime_result.json')) {
+      return '{"success": true, "path": "res://.godot/screenshot.png", "width": 1152, "height": 648}';
+    }
+    return pngData;
+  }) as typeof readFileSync);
+  vi.mocked(unlinkSync).mockReturnValue(undefined);
+}
+
+/**
  * Mock for the spawned resize_image.gd Godot process. Emits the given stdout/
  * stderr via 'data' events, then fires 'close' with the given exit code.
  * Uses setTimeout so it composes with vi.useFakeTimers().
@@ -172,13 +200,13 @@ describe('capture_screenshot MCP Tool', () => {
     );
   });
 
-  it('returns error when screenshot file is not produced within timeout', async () => {
+  it('returns error when the RuntimeHelper does not respond within the timeout', async () => {
     vi.mocked(validatePath).mockReturnValue(true);
     vi.mocked(existsSync).mockImplementation((path: string | unknown) => {
       const p = String(path);
       if (p.endsWith('project.godot')) return true;
-      // Screenshot output file never appears
-      if (p.endsWith('screenshot.png')) return false;
+      // IPC result file never appears
+      if (p.endsWith('runtime_result.json')) return false;
       return false;
     });
     vi.mocked(writeFileSync).mockReturnValue(undefined);
@@ -201,6 +229,35 @@ describe('capture_screenshot MCP Tool', () => {
     );
   });
 
+  it('surfaces a structured helper error (e.g. headless capture) as a toolError', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    vi.mocked(existsSync).mockImplementation((path: string | unknown) => {
+      const p = String(path);
+      if (p.endsWith('project.godot')) return true;
+      if (p.endsWith('runtime_result.json')) return true;
+      return false;
+    });
+    vi.mocked(writeFileSync).mockReturnValue(undefined);
+    vi.mocked(readFileSync).mockImplementation((() =>
+      '{"error": "Screenshot capture is not supported in headless mode (no rendering surface)"}') as unknown as typeof readFileSync);
+    vi.mocked(unlinkSync).mockReturnValue(undefined);
+
+    const mockProc = createMockProcess();
+    ctx.activeProcess = { process: mockProc, output: [], errors: [] };
+
+    const handler = handlers.get('capture_screenshot')!;
+    const resultPromise = handler({ project_path: '/my/project' });
+    await vi.advanceTimersByTimeAsync(200);
+
+    const result = await resultPromise as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining('not supported in headless mode'),
+      expect.any(Array),
+    );
+  });
+
   it('returns MCP image content with correct structure on success', async () => {
     vi.mocked(validatePath).mockReturnValue(true);
 
@@ -208,16 +265,8 @@ describe('capture_screenshot MCP Tool', () => {
     const fakePngData = Buffer.alloc(1024, 0x89);
     const expectedBase64 = fakePngData.toString('base64');
 
-    vi.mocked(existsSync).mockImplementation((path: string | unknown) => {
-      const p = String(path);
-      if (p.endsWith('project.godot')) return true;
-      if (p.endsWith('screenshot.png')) return true;
-      return false;
-    });
-    vi.mocked(writeFileSync).mockReturnValue(undefined);
-    vi.mocked(readFileSync).mockReturnValue(fakePngData);
+    mockIpcScreenshotSuccess(fakePngData);
     vi.mocked(statSync).mockReturnValue({ size: 1024 } as ReturnType<typeof statSync>);
-    vi.mocked(unlinkSync).mockReturnValue(undefined);
 
     const mockProc = createMockProcess();
     ctx.activeProcess = { process: mockProc, output: [], errors: [] };
@@ -238,21 +287,12 @@ describe('capture_screenshot MCP Tool', () => {
     expect(result.content[0].data).toBe(expectedBase64);
   });
 
-  it('writes a trigger file at the correct project-relative path', async () => {
+  it('writes a JSON "screenshot" command to the shared runtime trigger file', async () => {
     vi.mocked(validatePath).mockReturnValue(true);
 
     const fakePngData = Buffer.alloc(512, 0x89);
-
-    vi.mocked(existsSync).mockImplementation((path: string | unknown) => {
-      const p = String(path);
-      if (p.endsWith('project.godot')) return true;
-      if (p.endsWith('screenshot.png')) return true;
-      return false;
-    });
-    vi.mocked(writeFileSync).mockReturnValue(undefined);
-    vi.mocked(readFileSync).mockReturnValue(fakePngData);
+    mockIpcScreenshotSuccess(fakePngData);
     vi.mocked(statSync).mockReturnValue({ size: 512 } as ReturnType<typeof statSync>);
-    vi.mocked(unlinkSync).mockReturnValue(undefined);
 
     const mockProc = createMockProcess();
     ctx.activeProcess = { process: mockProc, output: [], errors: [] };
@@ -262,29 +302,23 @@ describe('capture_screenshot MCP Tool', () => {
     await vi.advanceTimersByTimeAsync(200);
     await resultPromise;
 
-    // Verify trigger file was written at the expected path
+    // Same trigger channel as the inspect_* tools — no separate
+    // screenshot_trigger file exists anymore.
     expect(writeFileSync).toHaveBeenCalledWith(
-      expect.stringContaining('.godot/screenshot_trigger'),
-      '',
+      expect.stringContaining('.godot/runtime_trigger'),
+      JSON.stringify({ command: 'screenshot', params: {} }),
     );
+    for (const call of vi.mocked(writeFileSync).mock.calls) {
+      expect(String(call[0])).not.toContain('screenshot_trigger');
+    }
   });
 
-  it('cleans up trigger and output files after successful capture', async () => {
+  it('cleans up the IPC files and the PNG after successful capture', async () => {
     vi.mocked(validatePath).mockReturnValue(true);
 
     const fakePngData = Buffer.alloc(512, 0x89);
-
-    vi.mocked(existsSync).mockImplementation((path: string | unknown) => {
-      const p = String(path);
-      if (p.endsWith('project.godot')) return true;
-      if (p.endsWith('screenshot.png')) return true;
-      if (p.endsWith('screenshot_trigger')) return true;
-      return false;
-    });
-    vi.mocked(writeFileSync).mockReturnValue(undefined);
-    vi.mocked(readFileSync).mockReturnValue(fakePngData);
+    mockIpcScreenshotSuccess(fakePngData);
     vi.mocked(statSync).mockReturnValue({ size: 512 } as ReturnType<typeof statSync>);
-    vi.mocked(unlinkSync).mockReturnValue(undefined);
 
     const mockProc = createMockProcess();
     ctx.activeProcess = { process: mockProc, output: [], errors: [] };
@@ -294,8 +328,11 @@ describe('capture_screenshot MCP Tool', () => {
     await vi.advanceTimersByTimeAsync(200);
     await resultPromise;
 
-    // Verify cleanup: trigger and output files are deleted
-    expect(unlinkSync).toHaveBeenCalledWith(expect.stringContaining('screenshot.png'));
+    // Verify cleanup: IPC result + trigger (via triggerAndPoll) and the PNG
+    const unlinked = vi.mocked(unlinkSync).mock.calls.map((call) => String(call[0]));
+    expect(unlinked.some((p) => p.endsWith('runtime_result.json'))).toBe(true);
+    expect(unlinked.some((p) => p.endsWith('runtime_trigger'))).toBe(true);
+    expect(unlinked.some((p) => p.endsWith('screenshot.png'))).toBe(true);
   });
 
   it('triggers resize for large screenshots (>800KB)', async () => {
@@ -306,20 +343,23 @@ describe('capture_screenshot MCP Tool', () => {
     // After resize, the file is smaller
     const smallPngData = Buffer.alloc(400 * 1024, 0x89);
 
-    let readCallCount = 0;
+    let pngReadCount = 0;
     vi.mocked(existsSync).mockImplementation((path: string | unknown) => {
       const p = String(path);
       if (p.endsWith('project.godot')) return true;
+      if (p.endsWith('runtime_result.json')) return true;
       if (p.endsWith('screenshot.png')) return true;
       return false;
     });
     vi.mocked(writeFileSync).mockReturnValue(undefined);
-    vi.mocked(readFileSync).mockImplementation(() => {
-      readCallCount++;
+    vi.mocked(readFileSync).mockImplementation(((path: string | unknown) => {
+      const p = String(path);
+      if (p.endsWith('runtime_result.json')) return '{"success": true}';
+      pngReadCount++;
       // First read returns large file, second read (after resize) returns smaller
-      if (readCallCount <= 1) return largePngData;
+      if (pngReadCount <= 1) return largePngData;
       return smallPngData;
-    });
+    }) as typeof readFileSync);
 
     let statCallCount = 0;
     vi.mocked(statSync).mockImplementation(() => {
@@ -364,14 +404,7 @@ describe('capture_screenshot MCP Tool', () => {
     vi.mocked(validatePath).mockReturnValue(true);
 
     const fakePngData = Buffer.alloc(512, 0x89);
-    vi.mocked(existsSync).mockImplementation((path: string | unknown) => {
-      const p = String(path);
-      if (p.endsWith('project.godot')) return true;
-      if (p.endsWith('screenshot.png')) return true;
-      return false;
-    });
-    vi.mocked(writeFileSync).mockReturnValue(undefined);
-    vi.mocked(readFileSync).mockReturnValue(fakePngData);
+    mockIpcScreenshotSuccess(fakePngData);
     // Large first stat triggers resize; second stat is post-resize
     let statCallCount = 0;
     vi.mocked(statSync).mockImplementation(() => {
@@ -379,7 +412,6 @@ describe('capture_screenshot MCP Tool', () => {
       if (statCallCount <= 1) return { size: 900 * 1024 } as ReturnType<typeof statSync>;
       return { size: 400 * 1024 } as ReturnType<typeof statSync>;
     });
-    vi.mocked(unlinkSync).mockReturnValue(undefined);
 
     vi.mocked(spawn).mockReturnValue(
       createMockResizeProcess({ stdout: '{"success": true}\n', exitCode: 0 }),
@@ -413,21 +445,13 @@ describe('capture_screenshot MCP Tool', () => {
     vi.mocked(validatePath).mockReturnValue(true);
 
     const fakePngData = Buffer.alloc(512, 0x89);
-    vi.mocked(existsSync).mockImplementation((path: string | unknown) => {
-      const p = String(path);
-      if (p.endsWith('project.godot')) return true;
-      if (p.endsWith('screenshot.png')) return true;
-      return false;
-    });
-    vi.mocked(writeFileSync).mockReturnValue(undefined);
-    vi.mocked(readFileSync).mockReturnValue(fakePngData);
+    mockIpcScreenshotSuccess(fakePngData);
     let statCallCount = 0;
     vi.mocked(statSync).mockImplementation(() => {
       statCallCount++;
       if (statCallCount <= 1) return { size: 900 * 1024 } as ReturnType<typeof statSync>;
       return { size: 400 * 1024 } as ReturnType<typeof statSync>;
     });
-    vi.mocked(unlinkSync).mockReturnValue(undefined);
 
     vi.mocked(spawn).mockReturnValue(
       createMockResizeProcess({ stdout: '{"success": true}\n', exitCode: 0 }),
@@ -441,8 +465,8 @@ describe('capture_screenshot MCP Tool', () => {
     await vi.advanceTimersByTimeAsync(200);
     await resultPromise;
 
-    // The only writeFileSync call is the screenshot trigger file — no
-    // generated .gd script is ever written or cleaned up.
+    // The only writeFileSync call is the IPC trigger file — no generated
+    // .gd script is ever written or cleaned up.
     for (const call of vi.mocked(writeFileSync).mock.calls) {
       expect(String(call[0])).not.toMatch(/\.gd$/);
     }
@@ -455,16 +479,8 @@ describe('capture_screenshot MCP Tool', () => {
     vi.mocked(validatePath).mockReturnValue(true);
 
     const fakePngData = Buffer.alloc(512, 0x89);
-    vi.mocked(existsSync).mockImplementation((path: string | unknown) => {
-      const p = String(path);
-      if (p.endsWith('project.godot')) return true;
-      if (p.endsWith('screenshot.png')) return true;
-      return false;
-    });
-    vi.mocked(writeFileSync).mockReturnValue(undefined);
-    vi.mocked(readFileSync).mockReturnValue(fakePngData);
+    mockIpcScreenshotSuccess(fakePngData);
     vi.mocked(statSync).mockReturnValue({ size: 900 * 1024 } as ReturnType<typeof statSync>);
-    vi.mocked(unlinkSync).mockReturnValue(undefined);
 
     vi.mocked(spawn).mockReturnValue(
       createMockResizeProcess({
@@ -494,16 +510,8 @@ describe('capture_screenshot MCP Tool', () => {
     vi.mocked(validatePath).mockReturnValue(true);
 
     const fakePngData = Buffer.alloc(512, 0x89);
-    vi.mocked(existsSync).mockImplementation((path: string | unknown) => {
-      const p = String(path);
-      if (p.endsWith('project.godot')) return true;
-      if (p.endsWith('screenshot.png')) return true;
-      return false;
-    });
-    vi.mocked(writeFileSync).mockReturnValue(undefined);
-    vi.mocked(readFileSync).mockReturnValue(fakePngData);
+    mockIpcScreenshotSuccess(fakePngData);
     vi.mocked(statSync).mockReturnValue({ size: 900 * 1024 } as ReturnType<typeof statSync>);
-    vi.mocked(unlinkSync).mockReturnValue(undefined);
 
     vi.mocked(spawn).mockReturnValue(
       createMockResizeProcess({ stderr: 'godot crashed hard\n', exitCode: 1 }),

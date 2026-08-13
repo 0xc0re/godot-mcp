@@ -53,21 +53,23 @@ vi.mock('../src/errors.js', () => ({
   })),
 }));
 
-// Mock helper-autoloads module (run_project auto-registers RuntimeHelper /
-// ScreenshotHelper; the real implementation would spawn Godot).
+// Mock helper-autoloads module (run_project temporarily injects the
+// RuntimeHelper autoload; the real implementation would spawn Godot).
 vi.mock('../src/helper-autoloads.js', () => ({
-  ensureRuntimeHelperAutoloads: vi.fn(async () => ({
-    registered: [],
-    alreadyRegistered: ['RuntimeHelper', 'ScreenshotHelper'],
-    failed: [],
+  injectRuntimeHelper: vi.fn(async () => ({
+    injected: true,
+    selfHealed: false,
+    failed: null,
+    injection: { projectPath: '/my/project', previousValue: null },
   })),
+  restoreHelperInjection: vi.fn(async () => true),
 }));
 
 import { existsSync } from 'fs';
 import { spawn } from 'child_process';
 import { validatePath } from '../src/godot.js';
 import { toolError } from '../src/errors.js';
-import { ensureRuntimeHelperAutoloads } from '../src/helper-autoloads.js';
+import { injectRuntimeHelper, restoreHelperInjection } from '../src/helper-autoloads.js';
 
 // Helper to extract registered tool handlers from McpServer
 function getToolHandlers(server: McpServer): Map<string, (params: Record<string, unknown>) => Promise<unknown>> {
@@ -323,34 +325,97 @@ describe('Editor MCP Tools', () => {
       expect(output).not.toContain('line-0');
     });
 
-    it('auto-registers runtime helper autoloads before spawning', async () => {
+    it('temporarily injects the RuntimeHelper autoload before spawning', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
       vi.mocked(spawn).mockReturnValue(createMockProcess());
-
-      const handler = handlers.get('run_project')!;
-      await handler({ project_path: '/my/project' });
-
-      expect(ensureRuntimeHelperAutoloads).toHaveBeenCalledWith(ctx, '/my/project');
-    });
-
-    it('surfaces newly registered helper autoloads in the response text', async () => {
-      vi.mocked(validatePath).mockReturnValue(true);
-      vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(spawn).mockReturnValue(createMockProcess());
-      vi.mocked(ensureRuntimeHelperAutoloads).mockResolvedValueOnce({
-        registered: ['RuntimeHelper', 'ScreenshotHelper'],
-        alreadyRegistered: [],
-        failed: [],
-      });
 
       const handler = handlers.get('run_project')!;
       const result = await handler({ project_path: '/my/project' }) as {
         content: Array<{ text: string }>;
       };
 
-      expect(result.content[0].text).toContain('RuntimeHelper');
-      expect(result.content[0].text).toContain('ScreenshotHelper');
+      expect(injectRuntimeHelper).toHaveBeenCalledWith(ctx, '/my/project');
+      expect(result.content[0].text).toContain('RuntimeHelper autoload injected');
+    });
+
+    it('skips injection entirely when inject_helpers is false', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(spawn).mockReturnValue(createMockProcess());
+
+      const handler = handlers.get('run_project')!;
+      const result = await handler({
+        project_path: '/my/project',
+        inject_helpers: false,
+      }) as { content: Array<{ text: string }> };
+
+      expect(injectRuntimeHelper).not.toHaveBeenCalled();
+      expect(result.content[0].text).toContain('Helper injection skipped');
+    });
+
+    it('surfaces an injection failure as a warning without blocking the run', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(spawn).mockReturnValue(createMockProcess());
+      vi.mocked(injectRuntimeHelper).mockResolvedValueOnce({
+        injected: false,
+        selfHealed: false,
+        failed: 'Failed to save project.godot: error code 7',
+        injection: null,
+      });
+
+      const handler = handlers.get('run_project')!;
+      const result = await handler({ project_path: '/my/project' }) as {
+        isError?: boolean;
+        content: Array<{ text: string }>;
+      };
+
+      expect(result.isError).toBeUndefined();
+      expect(ctx.activeProcess).not.toBeNull();
+      expect(result.content[0].text).toContain('Warning: failed to inject');
+    });
+
+    it('restores the injected autoload state when the process exits', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      const proc = createMockProcess();
+      vi.mocked(spawn).mockReturnValue(proc);
+      const injection = { projectPath: '/my/project', previousValue: null };
+      vi.mocked(injectRuntimeHelper).mockResolvedValueOnce({
+        injected: true,
+        selfHealed: false,
+        failed: null,
+        injection,
+      });
+
+      const handler = handlers.get('run_project')!;
+      await handler({ project_path: '/my/project' });
+      vi.mocked(restoreHelperInjection).mockClear();
+
+      proc.listeners.get('exit')!(0);
+      expect(restoreHelperInjection).toHaveBeenCalledWith(ctx, injection);
+    });
+
+    it('restores the injected autoload state when the process errors', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      const proc = createMockProcess();
+      vi.mocked(spawn).mockReturnValue(proc);
+      const injection = { projectPath: '/my/project', previousValue: null };
+      vi.mocked(injectRuntimeHelper).mockResolvedValueOnce({
+        injected: true,
+        selfHealed: false,
+        failed: null,
+        injection,
+      });
+
+      const handler = handlers.get('run_project')!;
+      await handler({ project_path: '/my/project' });
+      vi.mocked(restoreHelperInjection).mockClear();
+
+      proc.listeners.get('error')!(new Error('crashed'));
+      expect(restoreHelperInjection).toHaveBeenCalledWith(ctx, injection);
     });
 
     it('clears activeProcess when the process exits', async () => {
@@ -474,6 +539,20 @@ describe('Editor MCP Tools', () => {
       expect(parsed.message).toBe('Godot project stopped');
       expect(parsed.finalOutput).toEqual(['final line']);
       expect(parsed.finalErrors).toEqual(['final error']);
+    });
+
+    it('restores the injected autoload state on stop', async () => {
+      const proc = createMockProcess();
+      ctx.activeProcess = { process: proc, output: [], errors: [] };
+      const injection = { projectPath: '/my/project', previousValue: null };
+      ctx.helperInjection = injection;
+
+      const handler = handlers.get('stop_project')!;
+      const result = await handler({}) as { content: Array<{ text: string }> };
+
+      expect(restoreHelperInjection).toHaveBeenCalledWith(ctx, injection);
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.helpersRestored).toBe(true);
     });
 
     it('returns toolError when no process is active', async () => {

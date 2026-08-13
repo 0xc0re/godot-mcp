@@ -5,23 +5,18 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { join, dirname } from 'path';
-import { existsSync, writeFileSync, readFileSync, unlinkSync, statSync } from 'fs';
+import { existsSync, readFileSync, unlinkSync, statSync } from 'fs';
 import { spawn } from 'child_process';
 import type { ServerContext } from '../types.js';
 import { validatePath, trackProcess, parseOperationOutput } from '../godot.js';
 import { toolError } from '../errors.js';
 import { withProject, textResult, appendCapped } from './common.js';
-import { ensureRuntimeHelperAutoloads } from '../helper-autoloads.js';
+import { injectRuntimeHelper, restoreHelperInjection } from '../helper-autoloads.js';
+import { triggerAndPoll } from './runtime.js';
 import { logger } from '../logger.js';
 
 /** 800KB threshold for screenshot resize (conservative limit under Claude Desktop's 1MB) */
 const SCREENSHOT_SIZE_THRESHOLD = 800 * 1024;
-
-/** 5 second timeout waiting for screenshot file to appear */
-const SCREENSHOT_TIMEOUT_MS = 5000;
-
-/** 100ms polling interval for screenshot file */
-const SCREENSHOT_POLL_MS = 100;
 
 export function registerEditorTools(server: McpServer, ctx: ServerContext): void {
   // Tool 1: launch_editor
@@ -67,24 +62,41 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
       inputSchema: {
         project_path: z.string().describe('Path to the Godot project directory'),
         scene: z.string().optional().describe('Optional: Specific scene to run'),
+        inject_helpers: z
+          .boolean()
+          .optional()
+          .describe(
+            'Temporarily inject the RuntimeHelper autoload so inspect_* and capture_screenshot ' +
+              'work without manual setup (default true). The project.godot change is reverted on ' +
+              'stop_project / process exit. Set false to run the project completely untouched.',
+          ),
       },
     },
     withProject(
       {
         catchPrefix: 'Failed to run Godot project',
       },
-      async ({ project_path, scene }) => {
+      async ({ project_path, scene, inject_helpers }) => {
+        // Claim any leftover injection record synchronously BEFORE killing,
+        // so the outgoing process's exit handler no-ops and the restore is
+        // fully awaited before we inject again (no delete-vs-set race).
+        const restorePromise = restoreHelperInjection(ctx, ctx.helperInjection);
+
         // Kill any existing active process
         if (ctx.activeProcess) {
           logger.debug('Killing existing Godot process before starting a new one');
           ctx.activeProcess.process.kill();
         }
+        await restorePromise;
 
-        // Auto-register the runtime helper autoloads (RuntimeHelper /
-        // ScreenshotHelper) so inspect_* and capture_screenshot work without
-        // manual setup. Best-effort: a failure is surfaced in the response
-        // but never blocks the run.
-        const helpers = await ensureRuntimeHelperAutoloads(ctx, project_path);
+        // Temporarily inject the RuntimeHelper autoload so inspect_* and
+        // capture_screenshot work without manual setup. The previous
+        // project.godot state is restored on stop_project / process exit.
+        // Best-effort: a failure is surfaced in the response but never
+        // blocks the run.
+        const helpers =
+          inject_helpers !== false ? await injectRuntimeHelper(ctx, project_path) : null;
+        const injection = helpers?.injection ?? null;
 
         const cmdArgs = ['-d', '--path', project_path];
         if (scene && validatePath(scene)) {
@@ -123,6 +135,9 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
           if (ctx.activeProcess && ctx.activeProcess.process === proc) {
             ctx.activeProcess = null;
           }
+          // Restore the injected autoload state (guarded — no-op if
+          // stop_project or a newer run already claimed the record).
+          void restoreHelperInjection(ctx, injection);
         });
 
         proc.on('error', (err: Error) => {
@@ -130,16 +145,19 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
           if (ctx.activeProcess && ctx.activeProcess.process === proc) {
             ctx.activeProcess = null;
           }
+          void restoreHelperInjection(ctx, injection);
         });
 
         ctx.activeProcess = { process: proc, output, errors };
 
         let message = 'Godot project started in debug mode. Use get_debug_output to see output.';
-        if (helpers.registered.length > 0) {
-          message += ` Registered helper autoloads: ${helpers.registered.join(', ')}.`;
+        if (helpers === null) {
+          message += ' Helper injection skipped (inject_helpers: false).';
+        } else if (helpers.injected) {
+          message += ' RuntimeHelper autoload injected (reverted on stop).';
         }
-        if (helpers.failed.length > 0) {
-          message += ` Warning: failed to register helper autoloads: ${helpers.failed.join('; ')}.`;
+        if (helpers?.failed) {
+          message += ` Warning: failed to inject RuntimeHelper autoload: ${helpers.failed}.`;
         }
 
         return textResult(message);
@@ -196,10 +214,14 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
       }
 
       logger.debug('Stopping active Godot process');
+      // Claim the injection record synchronously (the kill's exit handler
+      // then no-ops) and restore the previous project.godot autoload state.
+      const restorePromise = restoreHelperInjection(ctx, ctx.helperInjection);
       ctx.activeProcess.process.kill();
       const output = ctx.activeProcess.output;
       const errors = ctx.activeProcess.errors;
       ctx.activeProcess = null;
+      const helpersRestored = await restorePromise;
 
       return {
         content: [
@@ -210,6 +232,7 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
                 message: 'Godot project stopped',
                 finalOutput: output,
                 finalErrors: errors,
+                helpersRestored,
               },
               null,
               2,
@@ -227,8 +250,8 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
       title: 'Capture Screenshot',
       description:
         'Capture a screenshot of the running Godot game and return it as a base64-encoded PNG image. ' +
-        'The ScreenshotHelper autoload (src/scripts/screenshot_helper.gd) must be added to the ' +
-        'Godot project for this tool to work. It monitors a trigger file and captures the viewport on demand.',
+        'Uses the RuntimeHelper autoload injected automatically by run_project (inject_helpers, ' +
+        'default true). Not available for headless runs (no rendering surface).',
       inputSchema: {
         project_path: z.string().describe('Path to the Godot project directory'),
       },
@@ -243,34 +266,31 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
       if (!ctx.activeProcess) {
         return toolError('No active Godot process. Cannot capture screenshot.', [
           'Use run_project to start a Godot project first',
-          'Ensure the ScreenshotHelper autoload is added to the project',
+          'Do not pass inject_helpers: false — capture_screenshot needs the RuntimeHelper autoload',
         ]);
       }
 
-      const triggerPath = join(project_path, '.godot', 'screenshot_trigger');
       const outputPath = join(project_path, '.godot', 'screenshot.png');
 
       try {
-        // Write trigger file to signal the GDScript helper
-        logger.debug(`Writing screenshot trigger: ${triggerPath}`);
-        writeFileSync(triggerPath, '');
+        // Route through the shared RuntimeHelper IPC channel (screenshot is
+        // one more command in runtime_helper.gd's dispatcher).
+        logger.debug(`Requesting screenshot via RuntimeHelper IPC`);
+        const ipcResult = await triggerAndPoll(project_path, 'screenshot', {});
 
-        // Poll for the output PNG file
-        const startTime = Date.now();
-        await new Promise<void>((resolve, reject) => {
-          const check = () => {
-            if (existsSync(outputPath)) {
-              resolve();
-              return;
-            }
-            if (Date.now() - startTime >= SCREENSHOT_TIMEOUT_MS) {
-              reject(new Error('timeout'));
-              return;
-            }
-            setTimeout(check, SCREENSHOT_POLL_MS);
-          };
-          setTimeout(check, SCREENSHOT_POLL_MS);
-        });
+        if (typeof ipcResult.error === 'string') {
+          return toolError(`Failed to capture screenshot: ${ipcResult.error}`, [
+            'Screenshots require a rendering surface — headless runs cannot capture the viewport',
+            'Verify the game is running and rendering frames',
+          ]);
+        }
+
+        if (!existsSync(outputPath)) {
+          return toolError('Screenshot helper responded but no PNG file was produced.', [
+            'Verify the game is running and rendering frames',
+            'Check that the .godot/ directory exists in the project',
+          ]);
+        }
 
         // Check file size and resize if needed
         let fileSize = statSync(outputPath).size;
@@ -285,16 +305,9 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
         const pngData = readFileSync(outputPath);
         const base64 = pngData.toString('base64');
 
-        // Cleanup
+        // Cleanup (the IPC trigger/result files are cleaned by triggerAndPoll)
         try {
           unlinkSync(outputPath);
-        } catch {
-          // Ignore cleanup errors
-        }
-        try {
-          if (existsSync(triggerPath)) {
-            unlinkSync(triggerPath);
-          }
         } catch {
           // Ignore cleanup errors
         }
@@ -311,9 +324,9 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
       } catch (error: unknown) {
         if (error instanceof Error && error.message === 'timeout') {
           return toolError(
-            'Screenshot capture timed out. The screenshot file was not produced within 5 seconds.',
+            'Screenshot capture timed out. The RuntimeHelper did not respond within 5 seconds.',
             [
-              'Ensure the ScreenshotHelper autoload is added to the Godot project',
+              'Ensure the project was started via run_project without inject_helpers: false',
               'Verify the game is running and rendering frames',
               'Check that the .godot/ directory exists in the project',
             ],
@@ -323,7 +336,7 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         return toolError(`Failed to capture screenshot: ${errorMessage}`, [
           'Ensure the game is running via run_project',
-          'Verify the ScreenshotHelper autoload is configured',
+          'Screenshots require a rendering surface — headless runs cannot capture the viewport',
         ]);
       }
     },

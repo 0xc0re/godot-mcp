@@ -1,18 +1,20 @@
-## Runtime inspection helper autoload for Godot MCP server.
+## Runtime helper autoload for Godot MCP server.
 ##
 ## Monitors a trigger file and responds with serialized scene tree data,
-## node properties, or group membership as JSON. Must be added as an
-## autoload named "RuntimeHelper" in the Godot project settings.
+## node properties, group membership, or a viewport screenshot. Injected
+## automatically by run_project as a TEMPORARY autoload named "RuntimeHelper"
+## (copied into .godot/mcp/ and removed from project.godot on stop) — no
+## manual setup is needed.
 ##
-## Setup: Project > Project Settings > Autoloads > Add this script
-##
-## Trigger file: res://.godot/runtime_trigger   (JSON with "command" and "params")
-## Output file:  res://.godot/runtime_result.json
+## Trigger file:    res://.godot/runtime_trigger   (JSON with "command" and "params")
+## Output file:     res://.godot/runtime_result.json
+## Screenshot file: res://.godot/screenshot.png    (written by the "screenshot" command)
 
 extends Node
 
 const TRIGGER_PATH := "res://.godot/runtime_trigger"
 const OUTPUT_PATH := "res://.godot/runtime_result.json"
+const SCREENSHOT_PATH := "res://.godot/screenshot.png"
 const POLL_INTERVAL := 0.5
 const MAX_TREE_DEPTH := 10
 
@@ -56,6 +58,8 @@ func _process(delta: float) -> void:
 			result = _inspect_node(params.get("node_path", ""))
 		"get_group":
 			result = _get_group(params.get("group", ""))
+		"screenshot":
+			result = await _capture_screenshot()
 		_:
 			result = {"error": "Unknown command: " + command}
 
@@ -117,6 +121,42 @@ func _inspect_node(node_path: String) -> Dictionary:
 		"type": node.get_class(),
 		"path": str(node.get_path()),
 		"properties": properties
+	}
+
+
+## Capture the viewport to SCREENSHOT_PATH and report the outcome.
+##
+## Headless-safe: with the headless display server there is no rendering
+## surface (frame_post_draw never fires and the viewport has no texture),
+## so the command fails fast with a structured error instead of hanging.
+func _capture_screenshot() -> Dictionary:
+	if DisplayServer.get_name() == "headless":
+		return {
+			"error": "Screenshot capture is not supported in headless mode (no rendering surface)"
+		}
+
+	# Wait for the current frame to finish rendering before grabbing pixels.
+	await RenderingServer.frame_post_draw
+
+	var viewport := get_viewport()
+	if viewport == null:
+		return {"error": "No viewport available"}
+	var texture := viewport.get_texture()
+	if texture == null:
+		return {"error": "Viewport has no texture to capture"}
+	var image: Image = texture.get_image()
+	if image == null or image.is_empty():
+		return {"error": "Failed to capture viewport image"}
+
+	var err := image.save_png(ProjectSettings.globalize_path(SCREENSHOT_PATH))
+	if err != OK:
+		return {"error": "Failed to save screenshot PNG: error code " + str(err)}
+
+	return {
+		"success": true,
+		"path": SCREENSHOT_PATH,
+		"width": image.get_width(),
+		"height": image.get_height()
 	}
 
 

@@ -45,21 +45,23 @@ vi.mock('../src/errors.js', () => ({
   })),
 }));
 
-// Mock helper-autoloads module (restart_project auto-registers RuntimeHelper /
-// ScreenshotHelper; the real implementation would spawn Godot).
+// Mock helper-autoloads module (restart_project temporarily re-injects the
+// RuntimeHelper autoload; the real implementation would spawn Godot).
 vi.mock('../src/helper-autoloads.js', () => ({
-  ensureRuntimeHelperAutoloads: vi.fn(async () => ({
-    registered: [],
-    alreadyRegistered: ['RuntimeHelper', 'ScreenshotHelper'],
-    failed: [],
+  injectRuntimeHelper: vi.fn(async () => ({
+    injected: true,
+    selfHealed: false,
+    failed: null,
+    injection: { projectPath: '/my/project', previousValue: null },
   })),
+  restoreHelperInjection: vi.fn(async () => true),
 }));
 
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { spawn } from 'child_process';
 import { validatePath, trackProcess } from '../src/godot.js';
 import { toolError } from '../src/errors.js';
-import { ensureRuntimeHelperAutoloads } from '../src/helper-autoloads.js';
+import { injectRuntimeHelper, restoreHelperInjection } from '../src/helper-autoloads.js';
 
 // Helper to extract registered tool handlers from McpServer
 function getToolHandlers(
@@ -659,7 +661,50 @@ describe('restart_project', () => {
     expect(parsed.running).toBe(true);
   });
 
-  it('auto-registers runtime helper autoloads before relaunching', async () => {
+  it('restores the previous injection, then re-injects the RuntimeHelper before relaunching', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    vi.mocked(existsSync).mockReturnValue(true);
+
+    const oldProcess = createMockProcess();
+    vi.mocked(oldProcess.once).mockImplementation(((event: string, cb: () => void) => {
+      if (event === 'exit') {
+        setTimeout(() => cb(), 0);
+      }
+      return oldProcess;
+    }) as typeof oldProcess.once);
+    ctx.activeProcess = { process: oldProcess, output: [], errors: [] };
+    const oldInjection = { projectPath: '/my/project', previousValue: null };
+    ctx.helperInjection = oldInjection;
+
+    const newProcess = {
+      pid: 5678,
+      killed: false,
+      stdout: {
+        on: vi.fn(),
+        once: vi.fn((event: string, cb: (data: Buffer) => void) => {
+          if (event === 'data') {
+            setTimeout(() => cb(Buffer.from('Godot Engine v4.3')), 0);
+          }
+          return newProcess.stdout;
+        }),
+      },
+      stderr: { on: vi.fn() },
+      on: vi.fn(),
+      once: vi.fn((_event: string, _cb: () => void) => newProcess),
+    } as unknown as ChildProcess;
+    vi.mocked(spawn).mockReturnValue(newProcess);
+
+    const handler = handlers.get('restart_project')!;
+    const resultPromise = handler({ project_path: '/my/project' });
+    await vi.advanceTimersByTimeAsync(100);
+    await resultPromise;
+
+    // Outgoing run's injection restored, then a fresh injection performed
+    expect(restoreHelperInjection).toHaveBeenCalledWith(ctx, oldInjection);
+    expect(injectRuntimeHelper).toHaveBeenCalledWith(ctx, '/my/project');
+  });
+
+  it('skips re-injection when inject_helpers is false', async () => {
     vi.mocked(validatePath).mockReturnValue(true);
     vi.mocked(existsSync).mockReturnValue(true);
 
@@ -691,11 +736,11 @@ describe('restart_project', () => {
     vi.mocked(spawn).mockReturnValue(newProcess);
 
     const handler = handlers.get('restart_project')!;
-    const resultPromise = handler({ project_path: '/my/project' });
+    const resultPromise = handler({ project_path: '/my/project', inject_helpers: false });
     await vi.advanceTimersByTimeAsync(100);
     await resultPromise;
 
-    expect(ensureRuntimeHelperAutoloads).toHaveBeenCalledWith(ctx, '/my/project');
+    expect(injectRuntimeHelper).not.toHaveBeenCalled();
   });
 
   it('registers exit/error handlers that clear ctx.activeProcess for the new process', async () => {

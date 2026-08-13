@@ -1,7 +1,9 @@
 /**
- * Tests for ensureRuntimeHelperAutoloads: copies runtime_helper.gd /
- * screenshot_helper.gd into the project and registers them as autoloads
- * via modify_project_setting (T7-hardened res:// convention).
+ * Tests for the temporary RuntimeHelper injection lifecycle:
+ * injectRuntimeHelper copies runtime_helper.gd into <project>/.godot/mcp/ and
+ * TEMPORARILY registers the autoload via modify_project_setting (T7-hardened
+ * res:// convention); restoreHelperInjection reverts project.godot to its
+ * previous state (delete when absent before, set-back when it existed).
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -26,7 +28,11 @@ vi.mock('../src/godot.js', () => ({
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { runOperation } from '../src/godot.js';
-import { ensureRuntimeHelperAutoloads } from '../src/helper-autoloads.js';
+import {
+  injectRuntimeHelper,
+  restoreHelperInjection,
+  HELPER_AUTOLOAD_VALUE,
+} from '../src/helper-autoloads.js';
 
 const OP_OK = {
   ok: true as const,
@@ -36,6 +42,14 @@ const OP_OK = {
   exitCode: 0,
 };
 
+const OP_FAIL = {
+  ok: false as const,
+  error: 'Failed to save project.godot: error code 7',
+  stdout: '',
+  stderr: '',
+  exitCode: 1,
+};
+
 function createTestContext(): ServerContext {
   return {
     godotPath: '/usr/bin/godot',
@@ -43,10 +57,11 @@ function createTestContext(): ServerContext {
     activeProcess: null,
     trackedProcesses: new Set(),
     validatedPaths: new Map(),
+    helperInjection: null,
   };
 }
 
-describe('ensureRuntimeHelperAutoloads', () => {
+describe('injectRuntimeHelper', () => {
   let ctx: ServerContext;
 
   beforeEach(() => {
@@ -54,8 +69,8 @@ describe('ensureRuntimeHelperAutoloads', () => {
     ctx = createTestContext();
   });
 
-  it('copies both helper scripts into addons/godot_mcp and registers autoloads', async () => {
-    // Helper sources exist next to godot_operations.gd; nothing exists in the project yet
+  it('copies runtime_helper.gd into .godot/mcp and temporarily registers the autoload', async () => {
+    // Helper source exists next to godot_operations.gd; nothing in the project yet
     vi.mocked(existsSync).mockImplementation((p) => String(p).startsWith('/srv/mcp/scripts/'));
     vi.mocked(readFileSync).mockImplementation((p) => {
       if (String(p).endsWith('project.godot')) return '[autoload]\n';
@@ -63,96 +78,127 @@ describe('ensureRuntimeHelperAutoloads', () => {
     });
     vi.mocked(runOperation).mockResolvedValue(OP_OK);
 
-    const result = await ensureRuntimeHelperAutoloads(ctx, '/my/project');
+    const result = await injectRuntimeHelper(ctx, '/my/project');
 
-    expect(result.registered).toEqual(['RuntimeHelper', 'ScreenshotHelper']);
-    expect(result.failed).toEqual([]);
+    expect(result.injected).toBe(true);
+    expect(result.selfHealed).toBe(false);
+    expect(result.failed).toBeNull();
+    // Entry was absent before -> restoration must delete it later
+    expect(result.injection).toEqual({ projectPath: '/my/project', previousValue: null });
+    expect(ctx.helperInjection).toBe(result.injection);
 
-    // Scripts copied into the project
-    expect(mkdirSync).toHaveBeenCalledWith('/my/project/addons/godot_mcp', { recursive: true });
+    // Script copied into .godot/mcp (NOT addons/)
+    expect(mkdirSync).toHaveBeenCalledWith('/my/project/.godot/mcp', { recursive: true });
     expect(writeFileSync).toHaveBeenCalledWith(
-      '/my/project/addons/godot_mcp/runtime_helper.gd',
-      '## helper source\n',
-      'utf-8',
-    );
-    expect(writeFileSync).toHaveBeenCalledWith(
-      '/my/project/addons/godot_mcp/screenshot_helper.gd',
+      '/my/project/.godot/mcp/runtime_helper.gd',
       '## helper source\n',
       'utf-8',
     );
 
     // Registered via modify_project_setting with the *res:// convention
-    // (built from a clean relative path — no res://res:// possible)
+    // (built from a clean relative constant — no res://res:// possible)
     expect(runOperation).toHaveBeenCalledWith(ctx, '/my/project', 'modify_project_setting', {
       section: 'autoload',
       key: 'RuntimeHelper',
-      value: '*res://addons/godot_mcp/runtime_helper.gd',
-      action: 'set',
-    });
-    expect(runOperation).toHaveBeenCalledWith(ctx, '/my/project', 'modify_project_setting', {
-      section: 'autoload',
-      key: 'ScreenshotHelper',
-      value: '*res://addons/godot_mcp/screenshot_helper.gd',
+      value: '*res://.godot/mcp/runtime_helper.gd',
       action: 'set',
     });
   });
 
-  it('spawns no Godot process when both autoloads are already registered', async () => {
+  it('records a pre-existing user autoload value for later restoration', async () => {
     vi.mocked(existsSync).mockReturnValue(true);
     vi.mocked(readFileSync).mockImplementation((p) => {
       if (String(p).endsWith('project.godot')) {
-        return [
-          '[autoload]',
-          'RuntimeHelper="*res://addons/godot_mcp/runtime_helper.gd"',
-          'ScreenshotHelper="*res://addons/godot_mcp/screenshot_helper.gd"',
-        ].join('\n');
+        return '[autoload]\nRuntimeHelper="*res://scripts/my_own_helper.gd"\n';
+      }
+      return '## helper source\n';
+    });
+    vi.mocked(runOperation).mockResolvedValue(OP_OK);
+
+    const result = await injectRuntimeHelper(ctx, '/my/project');
+
+    expect(result.injected).toBe(true);
+    // Previous value recorded with surrounding quotes stripped
+    expect(result.injection).toEqual({
+      projectPath: '/my/project',
+      previousValue: '*res://scripts/my_own_helper.gd',
+    });
+    expect(runOperation).toHaveBeenCalledWith(ctx, '/my/project', 'modify_project_setting', {
+      section: 'autoload',
+      key: 'RuntimeHelper',
+      value: HELPER_AUTOLOAD_VALUE,
+      action: 'set',
+    });
+  });
+
+  it('self-heals a stale entry from a dead run: adopts it without spawning Godot', async () => {
+    // kill -9 scenario: project.godot still carries our entry from a run
+    // that never got cleaned up
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      if (String(p).endsWith('project.godot')) {
+        return '[autoload]\nRuntimeHelper="*res://.godot/mcp/runtime_helper.gd"\n';
       }
       return '## helper source\n';
     });
 
-    const result = await ensureRuntimeHelperAutoloads(ctx, '/my/project');
+    const result = await injectRuntimeHelper(ctx, '/my/project');
 
-    expect(result.alreadyRegistered).toEqual(['RuntimeHelper', 'ScreenshotHelper']);
-    expect(result.registered).toEqual([]);
+    expect(result.injected).toBe(true);
+    expect(result.selfHealed).toBe(true);
+    // Adopted as "previously absent" so restoration removes it (no duplicate written)
+    expect(result.injection).toEqual({ projectPath: '/my/project', previousValue: null });
+    expect(ctx.helperInjection).toBe(result.injection);
     expect(runOperation).not.toHaveBeenCalled();
-    // Content identical -> no re-copy either
-    expect(writeFileSync).not.toHaveBeenCalled();
   });
 
-  it('re-copies a stale helper script when project copy differs from source', async () => {
+  it('is idempotent on re-run: identical script content and live entry mean no writes at all', async () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockImplementation((p) => {
+      if (String(p).endsWith('project.godot')) {
+        return '[autoload]\nRuntimeHelper="*res://.godot/mcp/runtime_helper.gd"\n';
+      }
+      return '## helper source\n'; // project copy identical to source
+    });
+
+    const result = await injectRuntimeHelper(ctx, '/my/project');
+
+    expect(result.injected).toBe(true);
+    expect(runOperation).not.toHaveBeenCalled();
+    expect(writeFileSync).not.toHaveBeenCalled();
+    expect(mkdirSync).not.toHaveBeenCalled();
+  });
+
+  it('refreshes a stale script copy when the project copy differs from source', async () => {
     vi.mocked(existsSync).mockReturnValue(true);
     vi.mocked(readFileSync).mockImplementation((p) => {
       const path = String(p);
       if (path.endsWith('project.godot')) {
-        return [
-          '[autoload]',
-          'RuntimeHelper="*res://addons/godot_mcp/runtime_helper.gd"',
-          'ScreenshotHelper="*res://addons/godot_mcp/screenshot_helper.gd"',
-        ].join('\n');
+        return '[autoload]\nRuntimeHelper="*res://.godot/mcp/runtime_helper.gd"\n';
       }
       if (path.startsWith('/srv/mcp/scripts/')) return '## new helper version\n';
       return '## old helper version\n';
     });
 
-    await ensureRuntimeHelperAutoloads(ctx, '/my/project');
+    await injectRuntimeHelper(ctx, '/my/project');
 
     expect(writeFileSync).toHaveBeenCalledWith(
-      '/my/project/addons/godot_mcp/runtime_helper.gd',
+      '/my/project/.godot/mcp/runtime_helper.gd',
       '## new helper version\n',
       'utf-8',
     );
   });
 
-  it('reports failed when the helper source script is missing', async () => {
+  it('reports failed (never throws) when the helper source script is missing', async () => {
     vi.mocked(existsSync).mockReturnValue(false);
     vi.mocked(readFileSync).mockReturnValue('');
 
-    const result = await ensureRuntimeHelperAutoloads(ctx, '/my/project');
+    const result = await injectRuntimeHelper(ctx, '/my/project');
 
-    expect(result.registered).toEqual([]);
-    expect(result.failed).toHaveLength(2);
-    expect(result.failed[0]).toContain('RuntimeHelper');
-    expect(result.failed[1]).toContain('ScreenshotHelper');
+    expect(result.injected).toBe(false);
+    expect(result.failed).toContain('helper script missing');
+    expect(result.injection).toBeNull();
+    expect(ctx.helperInjection).toBeNull();
     expect(runOperation).not.toHaveBeenCalled();
   });
 
@@ -162,33 +208,97 @@ describe('ensureRuntimeHelperAutoloads', () => {
       if (String(p).endsWith('project.godot')) return '';
       return '## helper source\n';
     });
-    vi.mocked(runOperation).mockResolvedValue({
-      ok: false,
-      error: 'Failed to save project.godot: error code 7',
-      stdout: '',
-      stderr: '',
-      exitCode: 1,
-    });
+    vi.mocked(runOperation).mockResolvedValue(OP_FAIL);
 
-    const result = await ensureRuntimeHelperAutoloads(ctx, '/my/project');
+    const result = await injectRuntimeHelper(ctx, '/my/project');
 
-    expect(result.registered).toEqual([]);
-    expect(result.failed).toHaveLength(2);
-    expect(result.failed[0]).toContain('Failed to save project.godot');
+    expect(result.injected).toBe(false);
+    expect(result.failed).toContain('Failed to save project.godot');
+    // No restoration record when project.godot was not modified
+    expect(result.injection).toBeNull();
+    expect(ctx.helperInjection).toBeNull();
+  });
+});
+
+describe('restoreHelperInjection', () => {
+  let ctx: ServerContext;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ctx = createTestContext();
   });
 
-  it('re-registers when the autoload points somewhere else', async () => {
-    vi.mocked(existsSync).mockReturnValue(true);
-    vi.mocked(readFileSync).mockImplementation((p) => {
-      if (String(p).endsWith('project.godot')) {
-        return '[autoload]\nRuntimeHelper="*res://somewhere/else.gd"\n';
-      }
-      return '## helper source\n';
-    });
+  it('deletes the autoload entry when it was absent before injection', async () => {
+    const injection = { projectPath: '/my/project', previousValue: null };
+    ctx.helperInjection = injection;
     vi.mocked(runOperation).mockResolvedValue(OP_OK);
 
-    const result = await ensureRuntimeHelperAutoloads(ctx, '/my/project');
+    const restored = await restoreHelperInjection(ctx, injection);
 
-    expect(result.registered).toContain('RuntimeHelper');
+    expect(restored).toBe(true);
+    expect(ctx.helperInjection).toBeNull();
+    expect(runOperation).toHaveBeenCalledWith(ctx, '/my/project', 'modify_project_setting', {
+      section: 'autoload',
+      key: 'RuntimeHelper',
+      action: 'delete',
+    });
+  });
+
+  it('restores the previous user value when the project had its own entry', async () => {
+    const injection = {
+      projectPath: '/my/project',
+      previousValue: '*res://scripts/my_own_helper.gd',
+    };
+    ctx.helperInjection = injection;
+    vi.mocked(runOperation).mockResolvedValue(OP_OK);
+
+    const restored = await restoreHelperInjection(ctx, injection);
+
+    expect(restored).toBe(true);
+    expect(runOperation).toHaveBeenCalledWith(ctx, '/my/project', 'modify_project_setting', {
+      section: 'autoload',
+      key: 'RuntimeHelper',
+      value: '*res://scripts/my_own_helper.gd',
+      action: 'set',
+    });
+  });
+
+  it('restores exactly once when stop_project and the exit handler race', async () => {
+    const injection = { projectPath: '/my/project', previousValue: null };
+    ctx.helperInjection = injection;
+    vi.mocked(runOperation).mockResolvedValue(OP_OK);
+
+    // Both callers hold the same record; the guard claims it synchronously
+    const [first, second] = await Promise.all([
+      restoreHelperInjection(ctx, injection),
+      restoreHelperInjection(ctx, injection),
+    ]);
+
+    expect([first, second].filter(Boolean)).toHaveLength(1);
+    expect(runOperation).toHaveBeenCalledTimes(1);
+  });
+
+  it('no-ops on a null or stale record (a newer injection owns the entry)', async () => {
+    const current = { projectPath: '/my/project', previousValue: null };
+    const stale = { projectPath: '/my/project', previousValue: null };
+    ctx.helperInjection = current;
+
+    expect(await restoreHelperInjection(ctx, null)).toBe(false);
+    expect(await restoreHelperInjection(ctx, stale)).toBe(false);
+    expect(runOperation).not.toHaveBeenCalled();
+    // The current record stays live for its rightful owner
+    expect(ctx.helperInjection).toBe(current);
+  });
+
+  it('re-arms the record for retry when the restore operation fails', async () => {
+    const injection = { projectPath: '/my/project', previousValue: null };
+    ctx.helperInjection = injection;
+    vi.mocked(runOperation).mockResolvedValue(OP_FAIL);
+
+    const restored = await restoreHelperInjection(ctx, injection);
+
+    expect(restored).toBe(false);
+    // Record re-armed so a later stop/run can retry the restore
+    expect(ctx.helperInjection).toBe(injection);
   });
 });

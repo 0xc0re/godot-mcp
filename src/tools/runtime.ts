@@ -14,7 +14,7 @@ import type { ServerContext } from '../types.js';
 import { validatePath, trackProcess } from '../godot.js';
 import { toolError } from '../errors.js';
 import { withProject, textResult, appendCapped } from './common.js';
-import { ensureRuntimeHelperAutoloads } from '../helper-autoloads.js';
+import { injectRuntimeHelper, restoreHelperInjection } from '../helper-autoloads.js';
 
 /** Relative path within project to the trigger file */
 const TRIGGER_PATH_SUFFIX = '.godot/runtime_trigger';
@@ -31,6 +31,9 @@ const POLL_INTERVAL_MS = 100;
 /**
  * Send a command to the runtime_helper.gd autoload and wait for its result.
  *
+ * Shared IPC channel for the inspect_* tools AND capture_screenshot (the
+ * screenshot helper was merged into runtime_helper.gd as one more command).
+ *
  * Deletes any stale output file FIRST, then writes the trigger file. This
  * ordering matters: deleting after the trigger is written races the helper's
  * response — a leftover result from a previous command could be read as this
@@ -39,7 +42,7 @@ const POLL_INTERVAL_MS = 100;
  * After the trigger is written, polls for the output file. On success, reads
  * and parses the JSON, then cleans up both files.
  */
-async function triggerAndPoll(
+export async function triggerAndPoll(
   projectPath: string,
   command: string,
   params: Record<string, unknown>,
@@ -108,7 +111,7 @@ export function registerRuntimeTools(server: McpServer, ctx: ServerContext): voi
       description:
         'Get a snapshot of the live scene tree from a running Godot project. ' +
         'Returns node names, types, paths, and hierarchy as JSON. ' +
-        'The RuntimeHelper autoload (src/scripts/runtime_helper.gd) must be added to the Godot project.',
+        'The RuntimeHelper autoload is injected automatically by run_project (inject_helpers, default true).',
       inputSchema: {
         project_path: z.string().describe('Path to the Godot project directory'),
       },
@@ -167,7 +170,7 @@ export function registerRuntimeTools(server: McpServer, ctx: ServerContext): voi
       description:
         'Inspect property values for a specific node in the running scene tree. ' +
         'Returns the node name, type, path, and a dictionary of property values. ' +
-        'The RuntimeHelper autoload (src/scripts/runtime_helper.gd) must be added to the Godot project.',
+        'The RuntimeHelper autoload is injected automatically by run_project (inject_helpers, default true).',
       inputSchema: {
         project_path: z.string().describe('Path to the Godot project directory'),
         node_path: z.string().describe('Path to the node, e.g. /root/Main/Player'),
@@ -229,7 +232,7 @@ export function registerRuntimeTools(server: McpServer, ctx: ServerContext): voi
       description:
         'List all nodes in a specific group in the running scene tree. ' +
         'Returns the group name, node count, and array of nodes with name, type, and path. ' +
-        'The RuntimeHelper autoload (src/scripts/runtime_helper.gd) must be added to the Godot project.',
+        'The RuntimeHelper autoload is injected automatically by run_project (inject_helpers, default true).',
       inputSchema: {
         project_path: z.string().describe('Path to the Godot project directory'),
         group: z.string().describe('Group name to query'),
@@ -295,18 +298,30 @@ export function registerRuntimeTools(server: McpServer, ctx: ServerContext): voi
       inputSchema: {
         project_path: z.string().describe('Path to the Godot project directory'),
         scene: z.string().optional().describe('Optional: Specific scene to run after restart'),
+        inject_helpers: z
+          .boolean()
+          .optional()
+          .describe(
+            'Temporarily inject the RuntimeHelper autoload for the runtime tools (default true). ' +
+              'Set false to relaunch the project completely untouched.',
+          ),
       },
     },
     withProject(
       {
         catchPrefix: 'Failed to restart Godot project',
       },
-      async ({ project_path, scene }) => {
+      async ({ project_path, scene, inject_helpers }) => {
         if (!ctx.activeProcess) {
           return toolError('No active Godot process to restart', [
             'Use run_project to start a Godot project first',
           ]);
         }
+
+        // Claim the outgoing run's injection record synchronously BEFORE
+        // killing, so the old process's exit handler no-ops and the restore
+        // is fully awaited before we inject again (no delete-vs-set race).
+        const restorePromise = restoreHelperInjection(ctx, ctx.helperInjection);
 
         // Kill existing process
         ctx.activeProcess.process.kill();
@@ -320,10 +335,13 @@ export function registerRuntimeTools(server: McpServer, ctx: ServerContext): voi
 
         // Clear old process state
         ctx.activeProcess = null;
+        await restorePromise;
 
-        // Auto-register the runtime helper autoloads before relaunching
+        // Temporarily inject the RuntimeHelper autoload before relaunching
         // (best-effort, mirrors run_project).
-        await ensureRuntimeHelperAutoloads(ctx, project_path);
+        const helpers =
+          inject_helpers !== false ? await injectRuntimeHelper(ctx, project_path) : null;
+        const injection = helpers?.injection ?? null;
 
         // Build args for new process
         const args = ['-d', '--path', project_path];
@@ -352,11 +370,13 @@ export function registerRuntimeTools(server: McpServer, ctx: ServerContext): voi
         });
 
         // Mirror run_project: clear activeProcess when the process dies so
-        // later tools don't act on a dead handle.
+        // later tools don't act on a dead handle, and restore the injected
+        // autoload state (guarded — no-op if stop/restart already did).
         proc.on('exit', () => {
           if (ctx.activeProcess && ctx.activeProcess.process === proc) {
             ctx.activeProcess = null;
           }
+          void restoreHelperInjection(ctx, injection);
         });
 
         proc.on('error', (err: Error) => {
@@ -364,6 +384,7 @@ export function registerRuntimeTools(server: McpServer, ctx: ServerContext): voi
           if (ctx.activeProcess && ctx.activeProcess.process === proc) {
             ctx.activeProcess = null;
           }
+          void restoreHelperInjection(ctx, injection);
         });
 
         ctx.activeProcess = { process: proc, output, errors };
