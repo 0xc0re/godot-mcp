@@ -1,0 +1,10 @@
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+
+Hello from plain print
+Second plain print line
+A print between error blocks
+
+Debugger Break, Reason: 'Invalid call. Nonexistent function 'do_something' in base 'Nil'.'
+*Frame 0 - res://main.gd:15 in function '_crash'
+Enter "help" for assistance.
+debug> 
