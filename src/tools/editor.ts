@@ -4,11 +4,11 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { existsSync, writeFileSync, readFileSync, unlinkSync, statSync } from 'fs';
 import { spawn } from 'child_process';
 import type { ServerContext } from '../types.js';
-import { validatePath, trackProcess } from '../godot.js';
+import { validatePath, trackProcess, parseOperationOutput } from '../godot.js';
 import { toolError } from '../errors.js';
 
 /** 800KB threshold for screenshot resize (conservative limit under Claude Desktop's 1MB) */
@@ -313,7 +313,7 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
         let fileSize = statSync(outputPath).size;
         if (fileSize > SCREENSHOT_SIZE_THRESHOLD) {
           logDebug(`Screenshot is ${fileSize} bytes, resizing to 960x540`);
-          await resizeScreenshot(ctx.godotPath, outputPath);
+          await resizeScreenshot(ctx, outputPath);
           fileSize = statSync(outputPath).size;
           logDebug(`Resized screenshot is ${fileSize} bytes`);
         }
@@ -367,47 +367,58 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
   );
 }
 
+/** Target dimensions for screenshot resize (keeps images under Claude Desktop's 1MB limit). */
+const RESIZE_WIDTH = 960;
+const RESIZE_HEIGHT = 540;
+
 /**
  * Resize a screenshot PNG to 960x540 using Godot headless.
- * This keeps the image under Claude Desktop's 1MB content limit.
+ *
+ * Runs the static src/scripts/resize_image.gd script, passing the image path
+ * and dimensions as positional argv after --script. No script source is ever
+ * generated at runtime, so a crafted image path cannot inject GDScript.
  */
-function resizeScreenshot(godotPath: string, imagePath: string): Promise<void> {
+function resizeScreenshot(ctx: ServerContext, imagePath: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const resizeScript = [
-      'extends SceneTree',
-      'func _init():',
-      `\tvar img = Image.load_from_file("${imagePath.replace(/\\/g, '/')}")`,
-      '\timg.resize(960, 540, Image.INTERPOLATE_BILINEAR)',
-      `\timg.save_png("${imagePath.replace(/\\/g, '/')}")`,
-      '\tquit()',
-    ].join('\n');
+    // Derive the script location from operationsScriptPath so this works from
+    // both the src/ and build/ layouts (the scripts live side by side).
+    const resizeScriptPath = join(dirname(ctx.operationsScriptPath), 'resize_image.gd');
 
-    const tmpScriptPath = imagePath.replace(/\.png$/, '_resize.gd');
-    writeFileSync(tmpScriptPath, resizeScript);
+    const proc = trackProcess(
+      ctx,
+      spawn(
+        ctx.godotPath,
+        [
+          '--headless',
+          '--script',
+          resizeScriptPath,
+          imagePath,
+          String(RESIZE_WIDTH),
+          String(RESIZE_HEIGHT),
+        ],
+        { stdio: 'pipe' },
+      ),
+    );
 
-    const proc = spawn(godotPath, ['--headless', '--script', tmpScriptPath], {
-      stdio: 'pipe',
-    });
+    const stdoutChunks: string[] = [];
+    const stderrChunks: string[] = [];
+    proc.stdout?.on('data', (data: Buffer) => stdoutChunks.push(data.toString()));
+    proc.stderr?.on('data', (data: Buffer) => stderrChunks.push(data.toString()));
 
     proc.on('close', (code: number | null) => {
-      try {
-        unlinkSync(tmpScriptPath);
-      } catch {
-        // Ignore cleanup errors
-      }
-      if (code === 0 || code === null) {
+      const result = parseOperationOutput(
+        stdoutChunks.join(''),
+        stderrChunks.join(''),
+        code,
+      );
+      if (result.ok) {
         resolve();
       } else {
-        reject(new Error(`Resize process exited with code ${code}`));
+        reject(new Error(result.error ?? `Resize process exited with code ${code}`));
       }
     });
 
     proc.on('error', (err: Error) => {
-      try {
-        unlinkSync(tmpScriptPath);
-      } catch {
-        // Ignore cleanup errors
-      }
       reject(err);
     });
   });

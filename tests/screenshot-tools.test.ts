@@ -33,11 +33,16 @@ vi.mock('child_process', async () => {
   };
 });
 
-// Mock godot module
-vi.mock('../src/godot.js', () => ({
-  validatePath: vi.fn(),
-  trackProcess: vi.fn((_ctx: unknown, proc: unknown) => proc),
-}));
+// Mock godot module (keep the real parseOperationOutput — it is pure and the
+// resize failure-path tests exercise its verdict handling)
+vi.mock('../src/godot.js', async () => {
+  const actual = await vi.importActual<typeof import('../src/godot.js')>('../src/godot.js');
+  return {
+    ...actual,
+    validatePath: vi.fn(),
+    trackProcess: vi.fn((_ctx: unknown, proc: unknown) => proc),
+  };
+});
 
 // Mock errors module
 vi.mock('../src/errors.js', () => ({
@@ -85,6 +90,41 @@ function createMockProcess(): ChildProcess {
     on: vi.fn(),
     once: vi.fn(),
   } as unknown as ChildProcess;
+}
+
+/**
+ * Mock for the spawned resize_image.gd Godot process. Emits the given stdout/
+ * stderr via 'data' events, then fires 'close' with the given exit code.
+ * Uses setTimeout so it composes with vi.useFakeTimers().
+ */
+function createMockResizeProcess(opts: {
+  stdout?: string;
+  stderr?: string;
+  exitCode?: number;
+}): ChildProcess {
+  const proc = {
+    stdout: {
+      on: vi.fn((event: string, cb: (data: Buffer) => void) => {
+        if (event === 'data' && opts.stdout) {
+          setTimeout(() => cb(Buffer.from(opts.stdout!)), 5);
+        }
+      }),
+    },
+    stderr: {
+      on: vi.fn((event: string, cb: (data: Buffer) => void) => {
+        if (event === 'data' && opts.stderr) {
+          setTimeout(() => cb(Buffer.from(opts.stderr!)), 5);
+        }
+      }),
+    },
+    on: vi.fn((event: string, cb: (code: number) => void) => {
+      if (event === 'close') {
+        setTimeout(() => cb(opts.exitCode ?? 0), 10);
+      }
+      return proc;
+    }),
+  };
+  return proc as unknown as ChildProcess;
 }
 
 describe('capture_screenshot MCP Tool', () => {
@@ -286,19 +326,12 @@ describe('capture_screenshot MCP Tool', () => {
     vi.mocked(unlinkSync).mockReturnValue(undefined);
 
     // Mock spawn for the resize process
-    const mockResizeProc = {
-      on: vi.fn((event: string, cb: (...args: unknown[]) => void) => {
-        if (event === 'close') {
-          // Simulate successful resize completion
-          setTimeout(() => cb(0), 10);
-        }
-        return mockResizeProc;
+    vi.mocked(spawn).mockReturnValue(
+      createMockResizeProcess({
+        stdout: '{"success": true, "image_path": "/my/project/.godot/screenshot.png", "width": 960, "height": 540}\n',
+        exitCode: 0,
       }),
-      stdin: { write: vi.fn(), end: vi.fn() },
-      stdout: { on: vi.fn() },
-      stderr: { on: vi.fn() },
-    };
-    vi.mocked(spawn).mockReturnValue(mockResizeProc as unknown as ChildProcess);
+    );
 
     const mockProc = createMockProcess();
     ctx.activeProcess = { process: mockProc, output: [], errors: [] };
@@ -321,6 +354,171 @@ describe('capture_screenshot MCP Tool', () => {
     // Should still return valid image content
     expect(result.content[0].type).toBe('image');
     expect(result.content[0].mimeType).toBe('image/png');
+  });
+
+  it('passes the static resize script and image path as positional argv (no interpolation)', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+
+    const fakePngData = Buffer.alloc(512, 0x89);
+    vi.mocked(existsSync).mockImplementation((path: string | unknown) => {
+      const p = String(path);
+      if (p.endsWith('project.godot')) return true;
+      if (p.endsWith('screenshot.png')) return true;
+      return false;
+    });
+    vi.mocked(writeFileSync).mockReturnValue(undefined);
+    vi.mocked(readFileSync).mockReturnValue(fakePngData);
+    // Large first stat triggers resize; second stat is post-resize
+    let statCallCount = 0;
+    vi.mocked(statSync).mockImplementation(() => {
+      statCallCount++;
+      if (statCallCount <= 1) return { size: 900 * 1024 } as ReturnType<typeof statSync>;
+      return { size: 400 * 1024 } as ReturnType<typeof statSync>;
+    });
+    vi.mocked(unlinkSync).mockReturnValue(undefined);
+
+    vi.mocked(spawn).mockReturnValue(
+      createMockResizeProcess({ stdout: '{"success": true}\n', exitCode: 0 }),
+    );
+
+    const mockProc = createMockProcess();
+    ctx.activeProcess = { process: mockProc, output: [], errors: [] };
+
+    const handler = handlers.get('capture_screenshot')!;
+    const resultPromise = handler({ project_path: '/my/project' });
+    await vi.advanceTimersByTimeAsync(200);
+    await resultPromise;
+
+    // Exact argv: static script (sibling of operationsScriptPath), then
+    // image path / width / height as positional args — no generated source.
+    expect(spawn).toHaveBeenCalledWith(
+      '/usr/bin/godot',
+      [
+        '--headless',
+        '--script',
+        '/path/to/resize_image.gd',
+        '/my/project/.godot/screenshot.png',
+        '960',
+        '540',
+      ],
+      { stdio: 'pipe' },
+    );
+  });
+
+  it('never writes a temp .gd script during resize', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+
+    const fakePngData = Buffer.alloc(512, 0x89);
+    vi.mocked(existsSync).mockImplementation((path: string | unknown) => {
+      const p = String(path);
+      if (p.endsWith('project.godot')) return true;
+      if (p.endsWith('screenshot.png')) return true;
+      return false;
+    });
+    vi.mocked(writeFileSync).mockReturnValue(undefined);
+    vi.mocked(readFileSync).mockReturnValue(fakePngData);
+    let statCallCount = 0;
+    vi.mocked(statSync).mockImplementation(() => {
+      statCallCount++;
+      if (statCallCount <= 1) return { size: 900 * 1024 } as ReturnType<typeof statSync>;
+      return { size: 400 * 1024 } as ReturnType<typeof statSync>;
+    });
+    vi.mocked(unlinkSync).mockReturnValue(undefined);
+
+    vi.mocked(spawn).mockReturnValue(
+      createMockResizeProcess({ stdout: '{"success": true}\n', exitCode: 0 }),
+    );
+
+    const mockProc = createMockProcess();
+    ctx.activeProcess = { process: mockProc, output: [], errors: [] };
+
+    const handler = handlers.get('capture_screenshot')!;
+    const resultPromise = handler({ project_path: '/my/project' });
+    await vi.advanceTimersByTimeAsync(200);
+    await resultPromise;
+
+    // The only writeFileSync call is the screenshot trigger file — no
+    // generated .gd script is ever written or cleaned up.
+    for (const call of vi.mocked(writeFileSync).mock.calls) {
+      expect(String(call[0])).not.toMatch(/\.gd$/);
+    }
+    for (const call of vi.mocked(unlinkSync).mock.calls) {
+      expect(String(call[0])).not.toMatch(/\.gd$/);
+    }
+  });
+
+  it('returns an error when the resize script reports a JSON failure verdict', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+
+    const fakePngData = Buffer.alloc(512, 0x89);
+    vi.mocked(existsSync).mockImplementation((path: string | unknown) => {
+      const p = String(path);
+      if (p.endsWith('project.godot')) return true;
+      if (p.endsWith('screenshot.png')) return true;
+      return false;
+    });
+    vi.mocked(writeFileSync).mockReturnValue(undefined);
+    vi.mocked(readFileSync).mockReturnValue(fakePngData);
+    vi.mocked(statSync).mockReturnValue({ size: 900 * 1024 } as ReturnType<typeof statSync>);
+    vi.mocked(unlinkSync).mockReturnValue(undefined);
+
+    vi.mocked(spawn).mockReturnValue(
+      createMockResizeProcess({
+        stdout: '{"success": false, "error": "Failed to load image: /my/project/.godot/screenshot.png"}\n',
+        stderr: '[ERROR] Failed to load image\n',
+        exitCode: 1,
+      }),
+    );
+
+    const mockProc = createMockProcess();
+    ctx.activeProcess = { process: mockProc, output: [], errors: [] };
+
+    const handler = handlers.get('capture_screenshot')!;
+    const resultPromise = handler({ project_path: '/my/project' });
+    await vi.advanceTimersByTimeAsync(200);
+
+    const result = await resultPromise as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to load image'),
+      expect.any(Array),
+    );
+  });
+
+  it('returns an error when the resize process exits non-zero without JSON output', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+
+    const fakePngData = Buffer.alloc(512, 0x89);
+    vi.mocked(existsSync).mockImplementation((path: string | unknown) => {
+      const p = String(path);
+      if (p.endsWith('project.godot')) return true;
+      if (p.endsWith('screenshot.png')) return true;
+      return false;
+    });
+    vi.mocked(writeFileSync).mockReturnValue(undefined);
+    vi.mocked(readFileSync).mockReturnValue(fakePngData);
+    vi.mocked(statSync).mockReturnValue({ size: 900 * 1024 } as ReturnType<typeof statSync>);
+    vi.mocked(unlinkSync).mockReturnValue(undefined);
+
+    vi.mocked(spawn).mockReturnValue(
+      createMockResizeProcess({ stderr: 'godot crashed hard\n', exitCode: 1 }),
+    );
+
+    const mockProc = createMockProcess();
+    ctx.activeProcess = { process: mockProc, output: [], errors: [] };
+
+    const handler = handlers.get('capture_screenshot')!;
+    const resultPromise = handler({ project_path: '/my/project' });
+    await vi.advanceTimersByTimeAsync(200);
+
+    const result = await resultPromise as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining('godot crashed hard'),
+      expect.any(Array),
+    );
   });
 
   it('returns error for invalid project path', async () => {
