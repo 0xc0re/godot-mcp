@@ -1,5 +1,6 @@
 /**
- * Tests for project MCP tools: read_project_settings, modify_project_setting.
+ * Tests for project MCP tools: get_godot_version, list_projects,
+ * get_project_info, read_project_settings, modify_project_setting.
  *
  * Uses vi.mock() to isolate tool logic from filesystem and Godot process.
  */
@@ -15,6 +16,7 @@ vi.mock('fs', async () => {
     ...actual,
     existsSync: vi.fn(),
     readFileSync: vi.fn(),
+    readdirSync: vi.fn(),
   };
 });
 
@@ -33,8 +35,8 @@ vi.mock('../src/errors.js', () => ({
   })),
 }));
 
-import { existsSync, readFileSync } from 'fs';
-import { validatePath, runOperation } from '../src/godot.js';
+import { existsSync, readFileSync, readdirSync } from 'fs';
+import { validatePath, runOperation, execGodot } from '../src/godot.js';
 import { toolError } from '../src/errors.js';
 import { registerProjectTools } from '../src/tools/project.js';
 
@@ -239,6 +241,242 @@ describe('Project MCP Tools', () => {
         key: 'config/name',
         value: '"Test"',
       }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  // ── get_godot_version ────────────────────────────────────────────────
+
+  describe('get_godot_version', () => {
+    it('registers the get_godot_version tool', () => {
+      expect(handlers.has('get_godot_version')).toBe(true);
+    });
+
+    it('returns the trimmed Godot version from execGodot', async () => {
+      vi.mocked(execGodot).mockResolvedValue({ stdout: '4.4.1.stable\n', stderr: '' });
+
+      const handler = handlers.get('get_godot_version')!;
+      const result = await handler({}) as {
+        isError?: boolean;
+        content: Array<{ text: string }>;
+      };
+
+      expect(execGodot).toHaveBeenCalledWith('/usr/bin/godot', ['--version']);
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toBe('4.4.1.stable');
+    });
+
+    it('returns toolError when execGodot rejects', async () => {
+      vi.mocked(execGodot).mockRejectedValue(new Error('godot: command not found'));
+
+      const handler = handlers.get('get_godot_version')!;
+      const result = await handler({}) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('godot: command not found'),
+        expect.any(Array),
+      );
+    });
+  });
+
+  // ── list_projects ────────────────────────────────────────────────────
+
+  describe('list_projects', () => {
+    // Minimal fs.Dirent stand-in for readdirSync({ withFileTypes: true })
+    function dirent(name: string, isDir: boolean) {
+      return { name, isDirectory: () => isDir, isFile: () => !isDir };
+    }
+
+    it('registers the list_projects tool', () => {
+      expect(handlers.has('list_projects')).toBe(true);
+    });
+
+    it('lists direct subdirectories containing project.godot', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockImplementation((p: unknown) => {
+        const path = String(p);
+        if (path === '/games') return true;
+        // Only game1 and game2 are Godot projects
+        return path === '/games/game1/project.godot' || path === '/games/game2/project.godot';
+      });
+      vi.mocked(readdirSync).mockImplementation(
+        () => [dirent('game1', true), dirent('game2', true), dirent('notes', true), dirent('README.md', false)] as never,
+      );
+
+      const handler = handlers.get('list_projects')!;
+      const result = await handler({ directory: '/games' }) as {
+        isError?: boolean;
+        content: Array<{ text: string }>;
+      };
+
+      expect(result.isError).toBeUndefined();
+      const projects = JSON.parse(result.content[0].text);
+      expect(projects).toEqual([
+        { path: '/games/game1', name: 'game1' },
+        { path: '/games/game2', name: 'game2' },
+      ]);
+    });
+
+    it('includes the directory itself when it is a Godot project', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockImplementation((p: unknown) => {
+        const path = String(p);
+        return path === '/games/game1' || path === '/games/game1/project.godot';
+      });
+      vi.mocked(readdirSync).mockImplementation(() => [] as never);
+
+      const handler = handlers.get('list_projects')!;
+      const result = await handler({ directory: '/games/game1' }) as {
+        content: Array<{ text: string }>;
+      };
+
+      const projects = JSON.parse(result.content[0].text);
+      expect(projects).toEqual([{ path: '/games/game1', name: 'game1' }]);
+    });
+
+    it('searches nested directories when recursive is true, skipping dot-dirs', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockImplementation((p: unknown) => {
+        const path = String(p);
+        if (path === '/games') return true;
+        return path === '/games/jam/entry/project.godot';
+      });
+      vi.mocked(readdirSync).mockImplementation((p: unknown) => {
+        const path = String(p);
+        if (path === '/games') return [dirent('jam', true), dirent('.git', true)] as never;
+        if (path === '/games/jam') return [dirent('entry', true)] as never;
+        return [] as never;
+      });
+
+      const handler = handlers.get('list_projects')!;
+      const result = await handler({ directory: '/games', recursive: true }) as {
+        content: Array<{ text: string }>;
+      };
+
+      const projects = JSON.parse(result.content[0].text);
+      expect(projects).toEqual([{ path: '/games/jam/entry', name: 'entry' }]);
+      // .git must never be scanned
+      expect(readdirSync).not.toHaveBeenCalledWith('/games/.git', expect.anything());
+    });
+
+    it('returns toolError when the directory does not exist', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const handler = handlers.get('list_projects')!;
+      const result = await handler({ directory: '/missing' }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Directory does not exist'),
+        expect.any(Array),
+      );
+    });
+
+    it('returns toolError when validatePath fails', async () => {
+      vi.mocked(validatePath).mockReturnValue(false);
+
+      const handler = handlers.get('list_projects')!;
+      const result = await handler({ directory: '/bad/../dir' }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  // ── get_project_info ─────────────────────────────────────────────────
+
+  describe('get_project_info', () => {
+    function dirent(name: string, isDir: boolean) {
+      return { name, isDirectory: () => isDir, isFile: () => !isDir };
+    }
+
+    it('registers the get_project_info tool', () => {
+      expect(handlers.has('get_project_info')).toBe(true);
+    });
+
+    it('returns name, path, godotVersion, and file-type structure counts', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(execGodot).mockResolvedValue({ stdout: '4.4.1.stable\n', stderr: '' });
+      vi.mocked(readdirSync).mockImplementation(
+        () =>
+          [
+            dirent('main.tscn', false),
+            dirent('level2.tscn', false),
+            dirent('player.gd', false),
+            dirent('sprite.png', false),
+            dirent('project.godot', false),
+          ] as never,
+      );
+      vi.mocked(readFileSync).mockReturnValue(SAMPLE_PROJECT_CONTENT);
+
+      const handler = handlers.get('get_project_info')!;
+      const result = await handler({ project_path: '/my/project' }) as {
+        isError?: boolean;
+        content: Array<{ text: string }>;
+      };
+
+      expect(result.isError).toBeUndefined();
+      const info = JSON.parse(result.content[0].text);
+      // config/name="My Game" from project.godot wins over the basename
+      expect(info.name).toBe('My Game');
+      expect(info.path).toBe('/my/project');
+      expect(info.godotVersion).toBe('4.4.1.stable');
+      expect(info.structure).toEqual({ scenes: 2, scripts: 1, assets: 1, other: 1 });
+    });
+
+    it('falls back to the directory basename when project.godot has no config/name', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(execGodot).mockResolvedValue({ stdout: '4.4.1.stable', stderr: '' });
+      vi.mocked(readdirSync).mockImplementation(() => [] as never);
+      vi.mocked(readFileSync).mockReturnValue('config_version=5\n');
+
+      const handler = handlers.get('get_project_info')!;
+      const result = await handler({ project_path: '/my/project' }) as {
+        content: Array<{ text: string }>;
+      };
+
+      const info = JSON.parse(result.content[0].text);
+      expect(info.name).toBe('project');
+    });
+
+    it('returns toolError when project.godot is missing', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const handler = handlers.get('get_project_info')!;
+      const result = await handler({ project_path: '/not/a/project' }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Not a valid Godot project'),
+        expect.any(Array),
+      );
+    });
+
+    it('returns toolError when execGodot rejects', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(execGodot).mockRejectedValue(new Error('godot crashed'));
+
+      const handler = handlers.get('get_project_info')!;
+      const result = await handler({ project_path: '/my/project' }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('godot crashed'),
+        expect.any(Array),
+      );
+    });
+
+    it('returns toolError when validatePath fails', async () => {
+      vi.mocked(validatePath).mockReturnValue(false);
+
+      const handler = handlers.get('get_project_info')!;
+      const result = await handler({ project_path: '/bad/../path' }) as { isError?: boolean };
 
       expect(result.isError).toBe(true);
     });

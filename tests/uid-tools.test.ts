@@ -44,6 +44,7 @@ vi.mock('../src/errors.js', () => ({
 
 import { existsSync } from 'fs';
 import { validatePath, execGodot, runOperation, isGodot44OrLater } from '../src/godot.js';
+import { toolError } from '../src/errors.js';
 
 // Helper to extract registered tool handlers from McpServer
 function getToolHandlers(
@@ -122,6 +123,167 @@ describe('UID MCP Tools', () => {
         'get_uid',
         { file_path: 'scenes/main.tscn' },
       );
+    });
+
+    it('returns toolError when runOperation yields ok:false', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(execGodot).mockResolvedValue({ stdout: '4.4.stable', stderr: '' });
+      vi.mocked(isGodot44OrLater).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'File is not a resource: scenes/main.tscn',
+        stdout: '',
+        stderr: '',
+        exitCode: 1,
+      });
+
+      const handler = handlers.get('get_uid')!;
+      const result = (await handler({
+        project_path: '/proj',
+        file_path: 'scenes/main.tscn',
+      })) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('File is not a resource: scenes/main.tscn'),
+        expect.any(Array),
+      );
+    });
+
+    it('returns toolError for Godot versions before 4.4', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(execGodot).mockResolvedValue({ stdout: '4.2.stable', stderr: '' });
+      vi.mocked(isGodot44OrLater).mockReturnValue(false);
+
+      const handler = handlers.get('get_uid')!;
+      const result = (await handler({
+        project_path: '/proj',
+        file_path: 'scenes/main.tscn',
+      })) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('4.4 or later'),
+        expect.any(Array),
+      );
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('returns toolError when execGodot rejects', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(execGodot).mockRejectedValue(new Error('godot crashed'));
+
+      const handler = handlers.get('get_uid')!;
+      const result = (await handler({
+        project_path: '/proj',
+        file_path: 'scenes/main.tscn',
+      })) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  // ── update_project_uids ──────────────────────────────────────────────
+
+  describe('update_project_uids', () => {
+    it('registers the update_project_uids tool', () => {
+      expect(handlers.has('update_project_uids')).toBe(true);
+    });
+
+    it('runs the resave_resources operation and returns success text', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(execGodot).mockResolvedValue({ stdout: '4.4.stable', stderr: '' });
+      vi.mocked(isGodot44OrLater).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { resaved: 12 },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
+
+      const handler = handlers.get('update_project_uids')!;
+      const result = (await handler({
+        project_path: '/proj',
+      })) as { isError?: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toContain('Project UIDs updated successfully');
+      expect(result.content[0].text).toContain('"resaved": 12');
+      expect(runOperation).toHaveBeenCalledWith(
+        ctx,
+        '/proj',
+        'resave_resources',
+        { project_path: '/proj' },
+      );
+    });
+
+    it('returns toolError when runOperation yields ok:false', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(execGodot).mockResolvedValue({ stdout: '4.4.stable', stderr: '' });
+      vi.mocked(isGodot44OrLater).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Failed to resave resources: write error',
+        stdout: '',
+        stderr: '',
+        exitCode: 1,
+      });
+
+      const handler = handlers.get('update_project_uids')!;
+      const result = (await handler({
+        project_path: '/proj',
+      })) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to resave resources: write error'),
+        expect.any(Array),
+      );
+    });
+
+    it('returns toolError for Godot versions before 4.4', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(execGodot).mockResolvedValue({ stdout: '4.2.stable', stderr: '' });
+      vi.mocked(isGodot44OrLater).mockReturnValue(false);
+
+      const handler = handlers.get('update_project_uids')!;
+      const result = (await handler({
+        project_path: '/proj',
+      })) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('returns toolError when project.godot is missing', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const handler = handlers.get('update_project_uids')!;
+      const result = (await handler({
+        project_path: '/not/a/project',
+      })) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('returns toolError when validatePath fails', async () => {
+      vi.mocked(validatePath).mockReturnValue(false);
+
+      const handler = handlers.get('update_project_uids')!;
+      const result = (await handler({
+        project_path: '/bad/../path',
+      })) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
     });
   });
 
