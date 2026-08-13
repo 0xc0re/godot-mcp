@@ -273,6 +273,59 @@ describe('tscn-writer', () => {
       expect(parsed.nodes).toHaveLength(2);
     });
 
+    it('rejects a property key that tries to forge extra lines or sections', () => {
+      expect(() => {
+        addNodeToScene(MINIMAL_SCENE, {
+          nodeType: 'Label',
+          nodeName: 'Victim',
+          properties: {
+            'x = 1\n[node name="Injected" type="Node2D" parent="."]\ny': 2,
+          },
+        });
+      }).toThrow(/Invalid property key/);
+    });
+
+    it('accepts Godot property-path keys with slashes and numeric segments', () => {
+      const result = addNodeToScene(MINIMAL_SCENE, {
+        nodeType: 'Node2D',
+        nodeName: 'Pathy',
+        properties: {
+          'physics/gravity': 9.8,
+          'theme_override_colors/font_color': { r: 1, g: 0, b: 0 },
+          'item/0/name': 'first',
+        },
+      });
+      expect(result).toContain('physics/gravity = 9.8');
+      expect(result).toContain('theme_override_colors/font_color = Color(1, 0, 0, 1)');
+      expect(result).toContain('item/0/name = "first"');
+    });
+
+    it('rejects a parentNodePath that tries to break out of the parent attribute', () => {
+      // A parent path that tries to close the attribute and forge a new
+      // [node] section. Quotes/backslashes/newlines are illegal in Godot node
+      // names, so this can only be an injection attempt and must be rejected.
+      const maliciousParent = 'root/Evil"]\n\n[node name="Injected" type="Node2D" parent=".';
+      expect(() => {
+        addNodeToScene(MINIMAL_SCENE, {
+          parentNodePath: maliciousParent,
+          nodeType: 'Label',
+          nodeName: 'Victim',
+        });
+      }).toThrow(/Invalid parent node path/);
+    });
+
+    it('accepts a parent path with spaces (legal in Godot node names)', () => {
+      const result = addNodeToScene(MINIMAL_SCENE, {
+        parentNodePath: 'root/My Panel/Sub Node',
+        nodeType: 'Label',
+        nodeName: 'Caption',
+      });
+      expect(result).toContain('[node name="Caption" type="Label" parent="My Panel/Sub Node"]');
+
+      const parsed = parseScene(result);
+      expect(parsed.nodes.map((n) => n.name)).toEqual(['Main', 'Caption']);
+    });
+
     it('throws on invalid .tscn content', () => {
       expect(() => {
         addNodeToScene('not a valid scene file', {

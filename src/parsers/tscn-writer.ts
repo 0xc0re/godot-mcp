@@ -26,6 +26,15 @@ export interface AddNodeOptions {
 const IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
+ * Valid .tscn property key: an identifier optionally followed by /-separated
+ * path segments (Godot property paths like "physics/gravity",
+ * "theme_override_colors/font_color", or indexed paths like "item/0/name").
+ * Rejects whitespace, quotes, newlines, and '=' so a key cannot forge
+ * extra property lines or sections.
+ */
+const PROPERTY_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*(\/[A-Za-z0-9_]+)*$/;
+
+/**
  * Escape a string for embedding inside a double-quoted .tscn string literal.
  *
  * Prevents quote/newline injection from breaking out of the literal and
@@ -129,12 +138,28 @@ export function addNodeToScene(content: string, opts: AddNodeOptions): string {
 
   const parent = resolveParentPath(opts.parentNodePath);
 
+  // The parent attribute is a node path that may legally contain
+  // non-identifier characters (Godot allows e.g. spaces in node names), but
+  // quotes, backslashes, and line breaks are illegal in Godot node names, so
+  // reject them rather than escape - they can only be an injection attempt.
+  if (/["\\\n\r]/.test(parent)) {
+    throw new Error(
+      `Invalid parent node path "${parent}": must not contain quotes, backslashes, or line breaks`,
+    );
+  }
+
   // Build the new node section
   let nodeSection = `\n[node name="${opts.nodeName}" type="${opts.nodeType}" parent="${parent}"]`;
 
-  // Add property lines
+  // Add property lines. Keys are validated so they cannot forge extra
+  // property lines or [node]/[sub_resource] sections.
   if (opts.properties) {
     for (const [key, value] of Object.entries(opts.properties)) {
+      if (!PROPERTY_KEY_RE.test(key)) {
+        throw new Error(
+          `Invalid property key "${key}": must be an identifier or /-separated property path`,
+        );
+      }
       nodeSection += `\n${key} = ${serializeGodotValue(value)}`;
     }
   }
