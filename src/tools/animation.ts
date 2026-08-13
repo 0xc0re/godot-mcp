@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { executeOperation, validatePath } from '../godot.js';
+import { runOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 
 export function registerAnimationTools(server: McpServer, ctx: ServerContext): void {
@@ -78,15 +78,15 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
         if (loop_mode !== undefined) params.loopMode = loop_mode;
         if (step !== undefined) params.step = step;
 
-        const { stdout, stderr } = await executeOperation(
+        const result = await runOperation(
           ctx,
           project_path as string,
           'create_animation',
           params,
         );
 
-        if (stderr && (stderr.includes('Failed to') || stderr.includes('[ERROR]'))) {
-          return toolError(`Failed to create animation: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to create animation: ${result.error}`, [
             'Check that the output path is valid',
             'Verify track paths reference existing node properties',
           ]);
@@ -96,7 +96,7 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
           content: [
             {
               type: 'text' as const,
-              text: stdout,
+              text: `Animation created at '${output_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };
@@ -152,15 +152,15 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
           animations,
         };
 
-        const { stdout, stderr } = await executeOperation(
+        const result = await runOperation(
           ctx,
           project_path as string,
           'create_animation_library',
           params,
         );
 
-        if (stderr && (stderr.includes('Failed to') || stderr.includes('[ERROR]'))) {
-          return toolError(`Failed to create animation library: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to create animation library: ${result.error}`, [
             'Check that the output path is valid',
             'Verify animation .tres paths are correct',
           ]);
@@ -170,7 +170,7 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
           content: [
             {
               type: 'text' as const,
-              text: stdout,
+              text: `Animation library created at '${output_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };
@@ -240,15 +240,15 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
         if (track_index !== undefined) params.trackIndex = track_index;
         if (track_path !== undefined) params.trackPath = track_path;
 
-        const { stdout, stderr } = await executeOperation(
+        const result = await runOperation(
           ctx,
           project_path as string,
           'add_keyframes',
           params,
         );
 
-        if (stderr && (stderr.includes('Failed to') || stderr.includes('[ERROR]'))) {
-          return toolError(`Failed to add keyframes: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to add keyframes: ${result.error}`, [
             'Check that the animation file exists',
             'Verify the track index or path is valid',
           ]);
@@ -258,7 +258,7 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
           content: [
             {
               type: 'text' as const,
-              text: stdout,
+              text: `Keyframes added to '${animation_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };
@@ -323,15 +323,15 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
           libraryPath: library_path,
         };
 
-        const { stdout, stderr } = await executeOperation(
+        const result = await runOperation(
           ctx,
           project_path as string,
           'assign_animation_library',
           params,
         );
 
-        if (stderr && (stderr.includes('Failed to') || stderr.includes('[ERROR]'))) {
-          return toolError(`Failed to assign animation library: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to assign animation library: ${result.error}`, [
             'Check that the scene and library files exist',
             'Verify the node path points to an AnimationPlayer node',
           ]);
@@ -341,7 +341,7 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
           content: [
             {
               type: 'text' as const,
-              text: stdout,
+              text: `Animation library '${library_name}' assigned to '${node_path}' in '${scene_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };

@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { executeOperation, validatePath } from '../godot.js';
+import { runOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 
 export function registerTileMapTools(server: McpServer, ctx: ServerContext): void {
@@ -97,15 +97,15 @@ export function registerTileMapTools(server: McpServer, ctx: ServerContext): voi
           params.rows = rows;
         }
 
-        const { stdout, stderr } = await executeOperation(
+        const result = await runOperation(
           ctx,
           project_path as string,
           'create_tileset',
           params,
         );
 
-        if (stderr && (stderr.includes('Failed to') || stderr.includes('[ERROR]'))) {
-          return toolError(`Failed to create tileset: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to create tileset: ${result.error}`, [
             'Check that the texture file exists at the specified path',
             'Verify tile dimensions are valid positive numbers',
             'Ensure the output directory exists',
@@ -116,7 +116,7 @@ export function registerTileMapTools(server: McpServer, ctx: ServerContext): voi
           content: [
             {
               type: 'text' as const,
-              text: `TileSet created at '${output_path}'\n\nOutput: ${stdout}`,
+              text: `TileSet created at '${output_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };
@@ -218,15 +218,15 @@ export function registerTileMapTools(server: McpServer, ctx: ServerContext): voi
           }
         }
 
-        const { stdout, stderr } = await executeOperation(
+        const result = await runOperation(
           ctx,
           project_path as string,
           'paint_tilemap',
           params,
         );
 
-        if (stderr && (stderr.includes('Failed to') || stderr.includes('[ERROR]'))) {
-          return toolError(`Failed to paint tilemap: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to paint tilemap: ${result.error}`, [
             'Check that the TileMapLayer node exists in the scene',
             'Verify the TileMapLayer has a TileSet assigned',
             'Ensure cell coordinates and source IDs are valid',
@@ -237,7 +237,7 @@ export function registerTileMapTools(server: McpServer, ctx: ServerContext): voi
           content: [
             {
               type: 'text' as const,
-              text: `TileMap ${mode} operation completed on '${node_path}'\n\nOutput: ${stdout}`,
+              text: `TileMap ${mode} operation completed on '${node_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };

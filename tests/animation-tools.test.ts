@@ -22,6 +22,7 @@ vi.mock('fs', async () => {
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
   executeOperation: vi.fn(),
+  runOperation: vi.fn(),
 }));
 
 // Mock errors module
@@ -33,7 +34,7 @@ vi.mock('../src/errors.js', () => ({
 }));
 
 import { existsSync } from 'fs';
-import { validatePath, executeOperation } from '../src/godot.js';
+import { validatePath, runOperation } from '../src/godot.js';
 import { registerAnimationTools } from '../src/tools/animation.js';
 
 // Helper to extract registered tool handlers from McpServer
@@ -109,10 +110,10 @@ describe('Animation MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('passes correct params to executeOperation', async () => {
+    it('passes correct params to runOperation', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({ ok: true, data: { success: true }, stdout: '', stderr: '', exitCode: 0 });
 
       const tracks = [
         {
@@ -134,7 +135,7 @@ describe('Animation MCP Tools', () => {
         tracks,
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'create_animation',
@@ -148,46 +149,33 @@ describe('Animation MCP Tools', () => {
       );
     });
 
-    it('returns stdout on success', async () => {
+    it('returns success payload on ok:true', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
-        stdout: '{"success":true,"path":"animations/walk.tres"}',
-        stderr: '',
-      });
-
-      const handler = handlers.get('create_animation')!;
-      const result = await handler({
-        project_path: '/my/project',
-        output_path: 'animations/walk.tres',
-        tracks: [],
-      }) as { content: Array<{ text: string }> };
-
-      expect(result.content[0].text).toContain('animations/walk.tres');
-    });
-
-    it('returns toolError on executeOperation failure', async () => {
-      vi.mocked(validatePath).mockReturnValue(true);
-      vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
-
-      const handler = handlers.get('create_animation')!;
-      const result = await handler({
-        project_path: '/my/project',
-        output_path: 'animations/walk.tres',
-        tracks: [],
-      }) as { isError?: boolean };
-
-      expect(result.isError).toBe(true);
-    });
-
-    it('returns toolError on stderr error', async () => {
-      vi.mocked(validatePath).mockReturnValue(true);
-      vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, path: 'res://animations/walk.tres', track_count: 1 },
         stdout: '',
-        stderr: 'Failed to create animation',
+        stderr: '',
+        exitCode: 0,
       });
+
+      const handler = handlers.get('create_animation')!;
+      const result = await handler({
+        project_path: '/my/project',
+        output_path: 'animations/walk.tres',
+        tracks: [],
+      }) as { content: Array<{ text: string }>; isError?: boolean };
+
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toContain('animations/walk.tres');
+      expect(result.content[0].text).toContain('track_count');
+    });
+
+    it('returns toolError on runOperation failure', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockRejectedValue(new Error('Process failed'));
 
       const handler = handlers.get('create_animation')!;
       const result = await handler({
@@ -197,6 +185,28 @@ describe('Animation MCP Tools', () => {
       }) as { isError?: boolean };
 
       expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError when runOperation yields ok:false', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Missing required parameter: output_path',
+        stdout: '',
+        stderr: '',
+        exitCode: 1,
+      });
+
+      const handler = handlers.get('create_animation')!;
+      const result = await handler({
+        project_path: '/my/project',
+        output_path: 'animations/walk.tres',
+        tracks: [],
+      }) as { content: Array<{ text: string }>; isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('Missing required parameter: output_path');
     });
   });
 
@@ -234,10 +244,10 @@ describe('Animation MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('passes correct params to executeOperation', async () => {
+    it('passes correct params to runOperation', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({ ok: true, data: { success: true }, stdout: '', stderr: '', exitCode: 0 });
 
       const animations = {
         walk: 'animations/walk.tres',
@@ -251,7 +261,7 @@ describe('Animation MCP Tools', () => {
         animations,
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'create_animation_library',
@@ -262,46 +272,33 @@ describe('Animation MCP Tools', () => {
       );
     });
 
-    it('returns stdout on success', async () => {
+    it('returns success payload on ok:true', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
-        stdout: '{"success":true,"path":"animations/library.tres"}',
-        stderr: '',
-      });
-
-      const handler = handlers.get('create_animation_library')!;
-      const result = await handler({
-        project_path: '/my/project',
-        output_path: 'animations/library.tres',
-        animations: { walk: 'animations/walk.tres' },
-      }) as { content: Array<{ text: string }> };
-
-      expect(result.content[0].text).toContain('animations/library.tres');
-    });
-
-    it('returns toolError on executeOperation failure', async () => {
-      vi.mocked(validatePath).mockReturnValue(true);
-      vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
-
-      const handler = handlers.get('create_animation_library')!;
-      const result = await handler({
-        project_path: '/my/project',
-        output_path: 'animations/library.tres',
-        animations: { walk: 'animations/walk.tres' },
-      }) as { isError?: boolean };
-
-      expect(result.isError).toBe(true);
-    });
-
-    it('returns toolError on stderr error', async () => {
-      vi.mocked(validatePath).mockReturnValue(true);
-      vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, path: 'res://animations/library.tres', animation_count: 1 },
         stdout: '',
-        stderr: '[ERROR] Failed to create animation library',
+        stderr: '',
+        exitCode: 0,
       });
+
+      const handler = handlers.get('create_animation_library')!;
+      const result = await handler({
+        project_path: '/my/project',
+        output_path: 'animations/library.tres',
+        animations: { walk: 'animations/walk.tres' },
+      }) as { content: Array<{ text: string }>; isError?: boolean };
+
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toContain('animations/library.tres');
+      expect(result.content[0].text).toContain('animation_count');
+    });
+
+    it('returns toolError on runOperation failure', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockRejectedValue(new Error('Process failed'));
 
       const handler = handlers.get('create_animation_library')!;
       const result = await handler({
@@ -311,6 +308,28 @@ describe('Animation MCP Tools', () => {
       }) as { isError?: boolean };
 
       expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError when runOperation yields ok:false', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Failed to load animation: res://animations/walk.tres',
+        stdout: '',
+        stderr: '',
+        exitCode: 1,
+      });
+
+      const handler = handlers.get('create_animation_library')!;
+      const result = await handler({
+        project_path: '/my/project',
+        output_path: 'animations/library.tres',
+        animations: { walk: 'animations/walk.tres' },
+      }) as { content: Array<{ text: string }>; isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('Failed to load animation');
     });
   });
 
@@ -350,10 +369,10 @@ describe('Animation MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('passes correct params with track_index to executeOperation', async () => {
+    it('passes correct params with track_index to runOperation', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({ ok: true, data: { success: true }, stdout: '', stderr: '', exitCode: 0 });
 
       const keyframes = [
         { time: 0.0, value: 0 },
@@ -369,7 +388,7 @@ describe('Animation MCP Tools', () => {
         keyframes,
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'add_keyframes',
@@ -381,10 +400,10 @@ describe('Animation MCP Tools', () => {
       );
     });
 
-    it('passes correct params with track_path to executeOperation', async () => {
+    it('passes correct params with track_path to runOperation', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({ ok: true, data: { success: true }, stdout: '', stderr: '', exitCode: 0 });
 
       const keyframes = [{ time: 0.0, value: { x: 0, y: 0 } }];
 
@@ -396,7 +415,7 @@ describe('Animation MCP Tools', () => {
         keyframes,
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'add_keyframes',
@@ -408,12 +427,15 @@ describe('Animation MCP Tools', () => {
       );
     });
 
-    it('returns stdout on success', async () => {
+    it('returns success payload on ok:true', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
-        stdout: '{"success":true,"keyframes_added":3}',
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, path: 'res://animations/walk.tres', keyframes_added: 3 },
+        stdout: '',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('add_keyframes')!;
@@ -422,15 +444,16 @@ describe('Animation MCP Tools', () => {
         animation_path: 'animations/walk.tres',
         track_index: 0,
         keyframes: [{ time: 0.5, value: 42 }],
-      }) as { content: Array<{ text: string }> };
+      }) as { content: Array<{ text: string }>; isError?: boolean };
 
+      expect(result.isError).toBeUndefined();
       expect(result.content[0].text).toContain('keyframes_added');
     });
 
-    it('returns toolError on executeOperation failure', async () => {
+    it('returns toolError on runOperation failure', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
+      vi.mocked(runOperation).mockRejectedValue(new Error('Process failed'));
 
       const handler = handlers.get('add_keyframes')!;
       const result = await handler({
@@ -443,23 +466,27 @@ describe('Animation MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('returns toolError on stderr error', async () => {
+    it('returns toolError when runOperation yields ok:false', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Track not found. Index: 5, Path: ',
         stdout: '',
-        stderr: 'Failed to add keyframes',
+        stderr: '',
+        exitCode: 1,
       });
 
       const handler = handlers.get('add_keyframes')!;
       const result = await handler({
         project_path: '/my/project',
         animation_path: 'animations/walk.tres',
-        track_index: 0,
+        track_index: 5,
         keyframes: [{ time: 0.5, value: 42 }],
-      }) as { isError?: boolean };
+      }) as { content: Array<{ text: string }>; isError?: boolean };
 
       expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('Track not found');
     });
   });
 
@@ -501,10 +528,10 @@ describe('Animation MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('passes correct params to executeOperation', async () => {
+    it('passes correct params to runOperation', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({ ok: true, data: { success: true }, stdout: '', stderr: '', exitCode: 0 });
 
       const handler = handlers.get('assign_animation_library')!;
       await handler({
@@ -515,7 +542,7 @@ describe('Animation MCP Tools', () => {
         library_path: 'animations/library.tres',
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'assign_animation_library',
@@ -528,12 +555,15 @@ describe('Animation MCP Tools', () => {
       );
     });
 
-    it('returns stdout on success', async () => {
+    it('returns success payload on ok:true', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
-        stdout: '{"success":true,"library":"default"}',
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, library_name: 'default', scene_path: 'res://scenes/player.tscn' },
+        stdout: '',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('assign_animation_library')!;
@@ -543,15 +573,16 @@ describe('Animation MCP Tools', () => {
         node_path: 'root/AnimationPlayer',
         library_name: 'default',
         library_path: 'animations/library.tres',
-      }) as { content: Array<{ text: string }> };
+      }) as { content: Array<{ text: string }>; isError?: boolean };
 
+      expect(result.isError).toBeUndefined();
       expect(result.content[0].text).toContain('default');
     });
 
-    it('returns toolError on executeOperation failure', async () => {
+    it('returns toolError on runOperation failure', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
+      vi.mocked(runOperation).mockRejectedValue(new Error('Process failed'));
 
       const handler = handlers.get('assign_animation_library')!;
       const result = await handler({
@@ -565,24 +596,28 @@ describe('Animation MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('returns toolError on stderr error', async () => {
+    it('returns toolError when runOperation yields ok:false', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Target node is not an AnimationPlayer: root/Sprite2D',
         stdout: '',
-        stderr: '[ERROR] Failed to assign animation library',
+        stderr: '',
+        exitCode: 1,
       });
 
       const handler = handlers.get('assign_animation_library')!;
       const result = await handler({
         project_path: '/my/project',
         scene_path: 'scenes/player.tscn',
-        node_path: 'root/AnimationPlayer',
+        node_path: 'root/Sprite2D',
         library_name: 'default',
         library_path: 'animations/library.tres',
-      }) as { isError?: boolean };
+      }) as { content: Array<{ text: string }>; isError?: boolean };
 
       expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('not an AnimationPlayer');
     });
   });
 });

@@ -21,6 +21,7 @@ vi.mock('fs', async () => {
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
   executeOperation: vi.fn(),
+  runOperation: vi.fn(),
 }));
 
 // Mock errors module
@@ -32,7 +33,7 @@ vi.mock('../src/errors.js', () => ({
 }));
 
 import { existsSync } from 'fs';
-import { validatePath, executeOperation } from '../src/godot.js';
+import { validatePath, runOperation } from '../src/godot.js';
 import { registerTileMapTools } from '../src/tools/tilemap.js';
 
 // Helper to extract registered tool handlers from McpServer
@@ -108,10 +109,10 @@ describe('TileMap MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('passes correct params to executeOperation with all optional params', async () => {
+    it('passes correct params to runOperation with all optional params', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({ ok: true, data: { success: true }, stdout: '', stderr: '', exitCode: 0 });
 
       const handler = handlers.get('create_tileset')!;
       await handler({
@@ -128,7 +129,7 @@ describe('TileMap MCP Tools', () => {
         rows: 4,
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'create_tileset',
@@ -150,7 +151,7 @@ describe('TileMap MCP Tools', () => {
     it('passes default params when optional params omitted', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({ ok: true, data: { success: true }, stdout: '', stderr: '', exitCode: 0 });
 
       const handler = handlers.get('create_tileset')!;
       await handler({
@@ -159,7 +160,7 @@ describe('TileMap MCP Tools', () => {
         texture_path: 'textures/ground.png',
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'create_tileset',
@@ -176,46 +177,39 @@ describe('TileMap MCP Tools', () => {
       );
     });
 
-    it('returns stdout on success', async () => {
+    it('returns success payload on ok:true', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
-        stdout: '{"success":true,"path":"tilesets/ground.tres"}',
-        stderr: '',
-      });
-
-      const handler = handlers.get('create_tileset')!;
-      const result = await handler({
-        project_path: '/my/project',
-        output_path: 'tilesets/ground.tres',
-        texture_path: 'textures/ground.png',
-      }) as { content: Array<{ text: string }> };
-
-      expect(result.content[0].text).toContain('tilesets/ground.tres');
-    });
-
-    it('returns toolError on executeOperation failure', async () => {
-      vi.mocked(validatePath).mockReturnValue(true);
-      vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
-
-      const handler = handlers.get('create_tileset')!;
-      const result = await handler({
-        project_path: '/my/project',
-        output_path: 'tilesets/ground.tres',
-        texture_path: 'textures/ground.png',
-      }) as { isError?: boolean };
-
-      expect(result.isError).toBe(true);
-    });
-
-    it('returns toolError on stderr error', async () => {
-      vi.mocked(validatePath).mockReturnValue(true);
-      vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: {
+          success: true,
+          path: 'res://tilesets/ground.tres',
+          source_id: 0,
+          grid_size: { x: 8, y: 4 },
+          tile_count: 32,
+        },
         stdout: '',
-        stderr: '[ERROR] Failed to create tileset',
+        stderr: '',
+        exitCode: 0,
       });
+
+      const handler = handlers.get('create_tileset')!;
+      const result = await handler({
+        project_path: '/my/project',
+        output_path: 'tilesets/ground.tres',
+        texture_path: 'textures/ground.png',
+      }) as { content: Array<{ text: string }>; isError?: boolean };
+
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toContain('tilesets/ground.tres');
+      expect(result.content[0].text).toContain('tile_count');
+    });
+
+    it('returns toolError on runOperation failure', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockRejectedValue(new Error('Process failed'));
 
       const handler = handlers.get('create_tileset')!;
       const result = await handler({
@@ -225,6 +219,28 @@ describe('TileMap MCP Tools', () => {
       }) as { isError?: boolean };
 
       expect(result.isError).toBe(true);
+    });
+
+    it('returns toolError when runOperation yields ok:false', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Failed to load texture: res://textures/ground.png',
+        stdout: '',
+        stderr: '',
+        exitCode: 1,
+      });
+
+      const handler = handlers.get('create_tileset')!;
+      const result = await handler({
+        project_path: '/my/project',
+        output_path: 'tilesets/ground.tres',
+        texture_path: 'textures/ground.png',
+      }) as { content: Array<{ text: string }>; isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('Failed to load texture');
     });
   });
 
@@ -267,7 +283,7 @@ describe('TileMap MCP Tools', () => {
     it('passes correct params for mode=paint with cells', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({ ok: true, data: { success: true }, stdout: '', stderr: '', exitCode: 0 });
 
       const cells = [
         { x: 0, y: 0, source_id: 0, atlas_x: 0, atlas_y: 0 },
@@ -283,7 +299,7 @@ describe('TileMap MCP Tools', () => {
         cells,
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'paint_tilemap',
@@ -299,7 +315,7 @@ describe('TileMap MCP Tools', () => {
     it('passes correct params for mode=fill with region bounds', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({ ok: true, data: { success: true }, stdout: '', stderr: '', exitCode: 0 });
 
       const handler = handlers.get('paint_tilemap')!;
       await handler({
@@ -317,7 +333,7 @@ describe('TileMap MCP Tools', () => {
         alternative_tile: 0,
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'paint_tilemap',
@@ -340,7 +356,7 @@ describe('TileMap MCP Tools', () => {
     it('passes correct params for mode=clear with specific cells', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({ ok: true, data: { success: true }, stdout: '', stderr: '', exitCode: 0 });
 
       const cells = [
         { x: 0, y: 0 },
@@ -356,7 +372,7 @@ describe('TileMap MCP Tools', () => {
         cells,
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'paint_tilemap',
@@ -372,7 +388,7 @@ describe('TileMap MCP Tools', () => {
     it('passes correct params for mode=clear without cells (clear all)', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({ ok: true, data: { success: true }, stdout: '', stderr: '', exitCode: 0 });
 
       const handler = handlers.get('paint_tilemap')!;
       await handler({
@@ -382,7 +398,7 @@ describe('TileMap MCP Tools', () => {
         mode: 'clear',
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'paint_tilemap',
@@ -394,12 +410,15 @@ describe('TileMap MCP Tools', () => {
       );
     });
 
-    it('returns stdout on success for paint mode', async () => {
+    it('returns success payload for paint mode without leaking raw stdout', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
-        stdout: '{"success":true,"cells_painted":2}',
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, cells_painted: 2 },
+        stdout: '[INFO] Painting tilemap in scene: res://scenes/level.tscn mode: paint\n{"success":true,"cells_painted":2}',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('paint_tilemap')!;
@@ -409,17 +428,22 @@ describe('TileMap MCP Tools', () => {
         node_path: 'root/TileMapLayer',
         mode: 'paint',
         cells: [{ x: 0, y: 0, source_id: 0, atlas_x: 0, atlas_y: 0 }],
-      }) as { content: Array<{ text: string }> };
+      }) as { content: Array<{ text: string }>; isError?: boolean };
 
+      expect(result.isError).toBeUndefined();
       expect(result.content[0].text).toContain('cells_painted');
+      expect(result.content[0].text).not.toContain('[INFO]');
     });
 
-    it('returns stdout on success for fill mode', async () => {
+    it('returns success payload for fill mode', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
-        stdout: '{"success":true,"mode":"fill"}',
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, cells_filled: 36 },
+        stdout: '',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('paint_tilemap')!;
@@ -432,17 +456,22 @@ describe('TileMap MCP Tools', () => {
         y_start: 0,
         x_end: 5,
         y_end: 5,
-      }) as { content: Array<{ text: string }> };
+      }) as { content: Array<{ text: string }>; isError?: boolean };
 
+      expect(result.isError).toBeUndefined();
       expect(result.content[0].text).toContain('fill');
+      expect(result.content[0].text).toContain('cells_filled');
     });
 
-    it('returns stdout on success for clear mode', async () => {
+    it('returns success payload for clear mode', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
-        stdout: '{"success":true,"mode":"clear"}',
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, cleared: 'all' },
+        stdout: '',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('paint_tilemap')!;
@@ -451,15 +480,16 @@ describe('TileMap MCP Tools', () => {
         scene_path: 'scenes/level.tscn',
         node_path: 'root/TileMapLayer',
         mode: 'clear',
-      }) as { content: Array<{ text: string }> };
+      }) as { content: Array<{ text: string }>; isError?: boolean };
 
+      expect(result.isError).toBeUndefined();
       expect(result.content[0].text).toContain('clear');
     });
 
-    it('returns toolError on executeOperation failure', async () => {
+    it('returns toolError on runOperation failure', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
+      vi.mocked(runOperation).mockRejectedValue(new Error('Process failed'));
 
       const handler = handlers.get('paint_tilemap')!;
       const result = await handler({
@@ -473,12 +503,15 @@ describe('TileMap MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('returns toolError on stderr error', async () => {
+    it('returns toolError when runOperation yields ok:false', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Target node is not a TileMapLayer: root/TileMapLayer',
         stdout: '',
-        stderr: '[ERROR] Failed to paint tilemap',
+        stderr: '',
+        exitCode: 1,
       });
 
       const handler = handlers.get('paint_tilemap')!;
@@ -491,9 +524,10 @@ describe('TileMap MCP Tools', () => {
         y_start: 0,
         x_end: 5,
         y_end: 5,
-      }) as { isError?: boolean };
+      }) as { content: Array<{ text: string }>; isError?: boolean };
 
       expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('not a TileMapLayer');
     });
   });
 });

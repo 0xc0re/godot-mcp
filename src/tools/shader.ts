@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { join, dirname } from 'path';
 import { existsSync, writeFileSync, mkdirSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { executeOperation, validatePath } from '../godot.js';
+import { runOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 
 export function registerShaderTools(server: McpServer, ctx: ServerContext): void {
@@ -136,15 +136,15 @@ export function registerShaderTools(server: McpServer, ctx: ServerContext): void
           params.paramTypes = param_types;
         }
 
-        const { stdout, stderr } = await executeOperation(
+        const result = await runOperation(
           ctx,
           project_path as string,
           'create_shader_material',
           params,
         );
 
-        if (stderr && (stderr.includes('Failed to') || stderr.includes('[ERROR]'))) {
-          return toolError(`Failed to create shader material: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to create shader material: ${result.error}`, [
             'Check that the .gdshader file exists at the specified path',
             'Verify the output path is valid',
             'Ensure shader parameter types match the shader uniforms',
@@ -155,7 +155,7 @@ export function registerShaderTools(server: McpServer, ctx: ServerContext): void
           content: [
             {
               type: 'text' as const,
-              text: `Shader material created at '${output_path}'\n\nOutput: ${stdout}`,
+              text: `Shader material created at '${output_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };
@@ -216,15 +216,15 @@ export function registerShaderTools(server: McpServer, ctx: ServerContext): void
           params.paramTypes = param_types;
         }
 
-        const { stdout, stderr } = await executeOperation(
+        const result = await runOperation(
           ctx,
           project_path as string,
           'set_shader_params',
           params,
         );
 
-        if (stderr && (stderr.includes('Failed to') || stderr.includes('[ERROR]'))) {
-          return toolError(`Failed to set shader params: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to set shader params: ${result.error}`, [
             'Check that the material file exists',
             'Verify parameter names match the shader uniforms',
             'Ensure parameter types are correct',
@@ -235,7 +235,7 @@ export function registerShaderTools(server: McpServer, ctx: ServerContext): void
           content: [
             {
               type: 'text' as const,
-              text: `Shader parameters updated on '${material_path}'\n\nOutput: ${stdout}`,
+              text: `Shader parameters updated on '${material_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };

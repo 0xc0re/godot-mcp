@@ -24,6 +24,7 @@ vi.mock('fs', async () => {
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
   executeOperation: vi.fn(),
+  runOperation: vi.fn(),
 }));
 
 // Mock errors module
@@ -35,7 +36,7 @@ vi.mock('../src/errors.js', () => ({
 }));
 
 import { existsSync, writeFileSync, mkdirSync } from 'fs';
-import { validatePath, executeOperation } from '../src/godot.js';
+import { validatePath, runOperation } from '../src/godot.js';
 import { registerShaderTools } from '../src/tools/shader.js';
 
 // Helper to extract registered tool handlers from McpServer
@@ -235,10 +236,10 @@ describe('Shader MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('calls executeOperation with correct camelCase params', async () => {
+    it('calls runOperation with correct camelCase params', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({ ok: true, data: { success: true }, stdout: '', stderr: '', exitCode: 0 });
 
       const handler = handlers.get('create_shader_material')!;
       await handler({
@@ -249,7 +250,7 @@ describe('Shader MCP Tools', () => {
         param_types: { color: 'Color', speed: 'float' },
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'create_shader_material',
@@ -265,7 +266,7 @@ describe('Shader MCP Tools', () => {
     it('handles optional params when not provided', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({ ok: true, data: { success: true }, stdout: '', stderr: '', exitCode: 0 });
 
       const handler = handlers.get('create_shader_material')!;
       await handler({
@@ -274,7 +275,7 @@ describe('Shader MCP Tools', () => {
         output_path: 'materials/test.tres',
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'create_shader_material',
@@ -285,12 +286,15 @@ describe('Shader MCP Tools', () => {
       );
     });
 
-    it('returns toolError when stderr contains error indicators', async () => {
+    it('returns toolError when runOperation yields ok:false', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Failed to load shader: res://shaders/test.gdshader',
         stdout: '',
-        stderr: '[ERROR] Failed to create shader material',
+        stderr: '',
+        exitCode: 1,
       });
 
       const handler = handlers.get('create_shader_material')!;
@@ -298,17 +302,21 @@ describe('Shader MCP Tools', () => {
         project_path: '/my/project',
         shader_path: 'shaders/test.gdshader',
         output_path: 'materials/test.tres',
-      }) as { isError?: boolean };
+      }) as { content: Array<{ text: string }>; isError?: boolean };
 
       expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('Failed to load shader');
     });
 
-    it('returns stdout on success', async () => {
+    it('returns success payload on ok:true', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
-        stdout: '{"success":true,"path":"materials/test.tres"}',
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, path: 'res://materials/test.tres' },
+        stdout: '',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('create_shader_material')!;
@@ -316,15 +324,16 @@ describe('Shader MCP Tools', () => {
         project_path: '/my/project',
         shader_path: 'shaders/test.gdshader',
         output_path: 'materials/test.tres',
-      }) as { content: Array<{ text: string }> };
+      }) as { content: Array<{ text: string }>; isError?: boolean };
 
+      expect(result.isError).toBeUndefined();
       expect(result.content[0].text).toContain('materials/test.tres');
     });
 
-    it('returns toolError on executeOperation exception', async () => {
+    it('returns toolError on runOperation failure', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
+      vi.mocked(runOperation).mockRejectedValue(new Error('Process failed'));
 
       const handler = handlers.get('create_shader_material')!;
       const result = await handler({
@@ -371,10 +380,10 @@ describe('Shader MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('calls executeOperation with correct camelCase params', async () => {
+    it('calls runOperation with correct camelCase params', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({ ok: true, data: { success: true }, stdout: '', stderr: '', exitCode: 0 });
 
       const handler = handlers.get('set_shader_params')!;
       await handler({
@@ -384,7 +393,7 @@ describe('Shader MCP Tools', () => {
         param_types: { speed: 'float', intensity: 'float' },
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'set_shader_params',
@@ -396,12 +405,15 @@ describe('Shader MCP Tools', () => {
       );
     });
 
-    it('returns stdout on success', async () => {
+    it('returns success payload on ok:true', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
-        stdout: '{"success":true,"updated_params":["speed"]}',
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, path: 'res://materials/test.tres', params_set: 1 },
+        stdout: '',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('set_shader_params')!;
@@ -409,17 +421,21 @@ describe('Shader MCP Tools', () => {
         project_path: '/my/project',
         material_path: 'materials/test.tres',
         shader_params: { speed: 3.0 },
-      }) as { content: Array<{ text: string }> };
+      }) as { content: Array<{ text: string }>; isError?: boolean };
 
-      expect(result.content[0].text).toContain('speed');
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toContain('params_set');
     });
 
-    it('returns toolError on stderr error', async () => {
+    it('returns toolError when runOperation yields ok:false', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Failed to load ShaderMaterial: res://materials/test.tres',
         stdout: '',
-        stderr: 'Failed to set shader params',
+        stderr: '',
+        exitCode: 1,
       });
 
       const handler = handlers.get('set_shader_params')!;
@@ -427,15 +443,16 @@ describe('Shader MCP Tools', () => {
         project_path: '/my/project',
         material_path: 'materials/test.tres',
         shader_params: { speed: 3.0 },
-      }) as { isError?: boolean };
+      }) as { content: Array<{ text: string }>; isError?: boolean };
 
       expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('Failed to load ShaderMaterial');
     });
 
-    it('returns toolError on executeOperation exception', async () => {
+    it('returns toolError on runOperation failure', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
+      vi.mocked(runOperation).mockRejectedValue(new Error('Process failed'));
 
       const handler = handlers.get('set_shader_params')!;
       const result = await handler({
