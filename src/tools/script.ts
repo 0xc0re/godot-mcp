@@ -14,6 +14,71 @@ import type { ServerContext } from '../types.js';
 import { runOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 
+/**
+ * Find the bare JSON summary line an op printed to stdout.
+ *
+ * validate_scripts / list_scripts don't emit a success/error envelope — they
+ * print a bare summary JSON line as their last output. Scans stdout from the
+ * last line backwards (the summary is trailing) and returns the first line
+ * that parses as JSON and satisfies the shape guard, so log noise and
+ * `{"success":false,...}` failure envelopes are never mistaken for a summary.
+ */
+function findSummaryJson<T>(
+  stdout: string,
+  isSummary: (candidate: unknown) => candidate is T,
+): T | undefined {
+  const lines = stdout.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line.startsWith('{')) {
+      continue;
+    }
+    try {
+      const candidate: unknown = JSON.parse(line);
+      if (isSummary(candidate)) {
+        return candidate;
+      }
+    } catch {
+      // Not valid JSON — keep scanning.
+    }
+  }
+  return undefined;
+}
+
+interface ValidateScriptsSummary {
+  results: Array<{ file: string; valid: boolean; error?: string }>;
+  total: number;
+  errors: number;
+  valid: number;
+}
+
+function isValidateScriptsSummary(candidate: unknown): candidate is ValidateScriptsSummary {
+  return (
+    typeof candidate === 'object' &&
+    candidate !== null &&
+    Array.isArray((candidate as ValidateScriptsSummary).results)
+  );
+}
+
+interface ListScriptsSummary {
+  scripts: Array<{
+    path: string;
+    class_name: string;
+    methods: Array<{ name: string; args: number }>;
+    properties: Array<{ name: string; type: number }>;
+    signals: Array<{ name: string; args: number }>;
+  }>;
+  total: number;
+}
+
+function isListScriptsSummary(candidate: unknown): candidate is ListScriptsSummary {
+  return (
+    typeof candidate === 'object' &&
+    candidate !== null &&
+    Array.isArray((candidate as ListScriptsSummary).scripts)
+  );
+}
+
 export function registerScriptTools(server: McpServer, ctx: ServerContext): void {
   // validate_scripts tool (SCRI-01)
   server.registerTool(
@@ -54,31 +119,28 @@ export function registerScriptTools(server: McpServer, ctx: ServerContext): void
 
         const result = await runOperation(ctx, project_path, 'validate_scripts', params);
 
-        if (!result.ok) {
-          return toolError(`Failed to validate scripts: ${result.error}`, [
-            'Godot may have encountered an error during validation',
-            result.stderr ? `Stderr: ${result.stderr}` : 'No stderr output',
-          ]);
-        }
-
         // validate_scripts doesn't emit a success/error envelope, so parse the JSON
         // summary line out of stdout directly rather than relying on result.data.
-        const lines = result.stdout.split('\n');
-        const jsonLine = lines.find((line) => line.trim().startsWith('{'));
+        // NOTE: a broken script in the project makes the Godot engine itself write
+        // `ERROR: Failed to load script ...` to stderr even though the op completes
+        // and prints its per-file summary (exit 0), which flips result.ok to false.
+        // Reporting invalid scripts is this tool's primary purpose, so a recovered
+        // summary always wins over the ok:false verdict; only fail hard when no
+        // summary was produced.
+        const parsed = findSummaryJson(result.stdout, isValidateScriptsSummary);
 
-        if (!jsonLine) {
+        if (!parsed) {
+          if (!result.ok) {
+            return toolError(`Failed to validate scripts: ${result.error}`, [
+              'Godot may have encountered an error during validation',
+              result.stderr ? `Stderr: ${result.stderr}` : 'No stderr output',
+            ]);
+          }
           return toolError('Failed to parse validation results from Godot output', [
             'Godot may have encountered an error during validation',
             result.stderr ? `Stderr: ${result.stderr}` : 'No stderr output',
           ]);
         }
-
-        const parsed = JSON.parse(jsonLine) as {
-          results: Array<{ file: string; valid: boolean; error?: string }>;
-          total: number;
-          errors: number;
-          valid: number;
-        };
 
         // Format the output
         let text = `Validated ${parsed.total} files: ${parsed.valid} valid, ${parsed.errors} error${parsed.errors !== 1 ? 's' : ''}`;
@@ -151,35 +213,27 @@ export function registerScriptTools(server: McpServer, ctx: ServerContext): void
 
         const result = await runOperation(ctx, project_path as string, 'list_scripts', params);
 
-        if (!result.ok) {
-          return toolError(`Failed to list scripts: ${result.error}`, [
-            'Godot may have encountered an error during script listing',
-            result.stderr ? `Stderr: ${result.stderr}` : 'No stderr output',
-          ]);
-        }
-
         // list_scripts doesn't emit a success/error envelope, so parse the JSON
         // summary line out of stdout directly rather than relying on result.data.
-        const lines = result.stdout.split('\n');
-        const jsonLine = lines.find((line) => line.trim().startsWith('{'));
+        // NOTE: a broken script in the project makes the Godot engine itself write
+        // `ERROR: Failed to load script ...` to stderr even though the op completes
+        // and prints its summary (exit 0), which flips result.ok to false. A
+        // recovered summary always wins over the ok:false verdict; only fail hard
+        // when no summary was produced.
+        const parsed = findSummaryJson(result.stdout, isListScriptsSummary);
 
-        if (!jsonLine) {
+        if (!parsed) {
+          if (!result.ok) {
+            return toolError(`Failed to list scripts: ${result.error}`, [
+              'Godot may have encountered an error during script listing',
+              result.stderr ? `Stderr: ${result.stderr}` : 'No stderr output',
+            ]);
+          }
           return toolError('Failed to parse script list from Godot output', [
             'Godot may have encountered an error during script listing',
             result.stderr ? `Stderr: ${result.stderr}` : 'No stderr output',
           ]);
         }
-
-        const parsed = JSON.parse(jsonLine) as {
-          scripts: Array<{
-            path: string;
-            class_name: string;
-            methods: Array<{ name: string; args: number }>;
-            properties: Array<{ name: string; type: number }>;
-            signals: Array<{ name: string; args: number }>;
-          }>;
-          total: number;
-        };
 
         // Format the output
         let text = `Found ${parsed.total} script${parsed.total !== 1 ? 's' : ''}`;
