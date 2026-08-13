@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { executeOperation, validatePath } from '../godot.js';
+import { runOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 
 export function registerScriptTools(server: McpServer, ctx: ServerContext): void {
@@ -49,28 +49,31 @@ export function registerScriptTools(server: McpServer, ctx: ServerContext): void
         }
 
         const params: Record<string, unknown> = {
-          pathFilter: path_filter || '',
+          path_filter: path_filter || '',
         };
 
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path,
-          'validate_scripts',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'validate_scripts', params);
 
-        // Parse the JSON line from Godot's mixed output
-        const lines = stdout.split('\n');
+        if (!result.ok) {
+          return toolError(`Failed to validate scripts: ${result.error}`, [
+            'Godot may have encountered an error during validation',
+            result.stderr ? `Stderr: ${result.stderr}` : 'No stderr output',
+          ]);
+        }
+
+        // validate_scripts doesn't emit a success/error envelope, so parse the JSON
+        // summary line out of stdout directly rather than relying on result.data.
+        const lines = result.stdout.split('\n');
         const jsonLine = lines.find((line) => line.trim().startsWith('{'));
 
         if (!jsonLine) {
           return toolError('Failed to parse validation results from Godot output', [
             'Godot may have encountered an error during validation',
-            stderr ? `Stderr: ${stderr}` : 'No stderr output',
+            result.stderr ? `Stderr: ${result.stderr}` : 'No stderr output',
           ]);
         }
 
-        const result = JSON.parse(jsonLine) as {
+        const parsed = JSON.parse(jsonLine) as {
           results: Array<{ file: string; valid: boolean; error?: string }>;
           total: number;
           errors: number;
@@ -78,11 +81,11 @@ export function registerScriptTools(server: McpServer, ctx: ServerContext): void
         };
 
         // Format the output
-        let text = `Validated ${result.total} files: ${result.valid} valid, ${result.errors} error${result.errors !== 1 ? 's' : ''}`;
+        let text = `Validated ${parsed.total} files: ${parsed.valid} valid, ${parsed.errors} error${parsed.errors !== 1 ? 's' : ''}`;
 
-        if (result.errors > 0) {
+        if (parsed.errors > 0) {
           text += '\n\nErrors:';
-          for (const entry of result.results) {
+          for (const entry of parsed.results) {
             if (!entry.valid) {
               text += `\n- ${entry.file}: ${entry.error || 'Unknown error'}`;
             }
@@ -143,28 +146,31 @@ export function registerScriptTools(server: McpServer, ctx: ServerContext): void
         }
 
         const params: Record<string, unknown> = {
-          pathFilter: (path_filter as string) || '',
+          path_filter: (path_filter as string) || '',
         };
 
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path as string,
-          'list_scripts',
-          params,
-        );
+        const result = await runOperation(ctx, project_path as string, 'list_scripts', params);
 
-        // Parse the JSON line from Godot's mixed output
-        const lines = stdout.split('\n');
+        if (!result.ok) {
+          return toolError(`Failed to list scripts: ${result.error}`, [
+            'Godot may have encountered an error during script listing',
+            result.stderr ? `Stderr: ${result.stderr}` : 'No stderr output',
+          ]);
+        }
+
+        // list_scripts doesn't emit a success/error envelope, so parse the JSON
+        // summary line out of stdout directly rather than relying on result.data.
+        const lines = result.stdout.split('\n');
         const jsonLine = lines.find((line) => line.trim().startsWith('{'));
 
         if (!jsonLine) {
           return toolError('Failed to parse script list from Godot output', [
             'Godot may have encountered an error during script listing',
-            stderr ? `Stderr: ${stderr}` : 'No stderr output',
+            result.stderr ? `Stderr: ${result.stderr}` : 'No stderr output',
           ]);
         }
 
-        const result = JSON.parse(jsonLine) as {
+        const parsed = JSON.parse(jsonLine) as {
           scripts: Array<{
             path: string;
             class_name: string;
@@ -176,9 +182,9 @@ export function registerScriptTools(server: McpServer, ctx: ServerContext): void
         };
 
         // Format the output
-        let text = `Found ${result.total} script${result.total !== 1 ? 's' : ''}`;
+        let text = `Found ${parsed.total} script${parsed.total !== 1 ? 's' : ''}`;
 
-        for (const script of result.scripts) {
+        for (const script of parsed.scripts) {
           text += `\n\n${script.path}`;
           if (script.class_name) {
             text += ` (class: ${script.class_name})`;
@@ -245,43 +251,38 @@ export function registerScriptTools(server: McpServer, ctx: ServerContext): void
         }
 
         const params: Record<string, unknown> = {
-          className: class_name as string,
-          noInheritance: (no_inheritance as boolean) || false,
+          class_name: class_name as string,
+          no_inheritance: (no_inheritance as boolean) || false,
         };
 
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path as string,
-          'query_class',
-          params,
-        );
+        const result = await runOperation(ctx, project_path as string, 'query_class', params);
 
-        // Parse the JSON line from Godot's mixed output
-        const lines = stdout.split('\n');
-        const jsonLine = lines.find((line) => line.trim().startsWith('{'));
-
-        if (!jsonLine) {
-          return toolError('Failed to parse class info from Godot output', [
-            'Godot may have encountered an error during class query',
-            stderr ? `Stderr: ${stderr}` : 'No stderr output',
-          ]);
-        }
-
-        const result = JSON.parse(jsonLine) as Record<string, unknown>;
-
-        // Check for error response from GDScript
-        if ('error' in result) {
-          return toolError(result.error as string, [
+        if (!result.ok) {
+          return toolError(`Failed to query class: ${result.error}`, [
             'Check that the class name is spelled correctly',
             'Use a built-in Godot class name like Node2D, CharacterBody3D, etc.',
           ]);
         }
 
+        // query_class's success path doesn't emit a success envelope, so parse the
+        // JSON line out of stdout directly rather than relying on result.data.
+        const lines = result.stdout.split('\n');
+        const jsonLine = lines.find((line) => line.trim().startsWith('{'));
+
+        if (!jsonLine) {
+          return toolError('Failed to parse class info from Godot output', [
+            'Godot may have encountered an error during class query',
+            result.stderr ? `Stderr: ${result.stderr}` : 'No stderr output',
+          ]);
+        }
+
+        const parsed = JSON.parse(jsonLine) as Record<string, unknown>;
+
         return {
           content: [
             {
               type: 'text' as const,
-              text: JSON.stringify(result, null, 2),
+              text: JSON.stringify(parsed, null, 2),
             },
           ],
         };

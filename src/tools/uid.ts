@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { execGodot, executeOperation, isGodot44OrLater, validatePath } from '../godot.js';
+import { execGodot, runOperation, isGodot44OrLater, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 
 export function registerUidTools(server: McpServer, ctx: ServerContext): void {
@@ -66,26 +66,27 @@ export function registerUidTools(server: McpServer, ctx: ServerContext): void {
           );
         }
 
-        const params = { filePath: file_path };
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path,
-          'get_uid',
-          params,
-        );
+        const params = { file_path: file_path };
+        const result = await runOperation(ctx, project_path, 'get_uid', params);
 
-        if (stderr && stderr.includes('Failed to')) {
-          return toolError(`Failed to get UID: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to get UID: ${result.error}`, [
             'Check if the file is a valid Godot resource',
             'Ensure the file path is correct',
           ]);
         }
 
+        const data = result.data as { uid?: string; exists?: boolean; message?: string } | undefined;
+        const text =
+          data?.exists && data.uid
+            ? `UID for ${file_path}: ${data.uid}`
+            : `UID for ${file_path}: ${data?.message ?? 'UID not found'}`;
+
         return {
           content: [
             {
               type: 'text' as const,
-              text: `UID for ${file_path}: ${stdout.trim()}`,
+              text,
             },
           ],
         };
@@ -143,16 +144,11 @@ export function registerUidTools(server: McpServer, ctx: ServerContext): void {
           );
         }
 
-        const params = { projectPath: project_path };
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path,
-          'resave_resources',
-          params,
-        );
+        const params = { project_path: project_path };
+        const result = await runOperation(ctx, project_path, 'resave_resources', params);
 
-        if (stderr && stderr.includes('Failed to')) {
-          return toolError(`Failed to update project UIDs: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to update project UIDs: ${result.error}`, [
             'Check if the project is valid',
             'Ensure you have write permissions to the project directory',
           ]);
@@ -162,7 +158,7 @@ export function registerUidTools(server: McpServer, ctx: ServerContext): void {
           content: [
             {
               type: 'text' as const,
-              text: `Project UIDs updated successfully.\n\nOutput: ${stdout}`,
+              text: `Project UIDs updated successfully.\n\nOutput: ${JSON.stringify(result.data ?? {}, null, 2)}`,
             },
           ],
         };

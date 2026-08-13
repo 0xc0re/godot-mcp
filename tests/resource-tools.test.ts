@@ -22,6 +22,7 @@ vi.mock('fs', async () => {
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
   executeOperation: vi.fn(),
+  runOperation: vi.fn(),
 }));
 
 // Mock tscn-parser module
@@ -38,8 +39,9 @@ vi.mock('../src/errors.js', () => ({
 }));
 
 import { existsSync, readFileSync } from 'fs';
-import { validatePath, executeOperation } from '../src/godot.js';
+import { validatePath, executeOperation, runOperation } from '../src/godot.js';
 import { parseResource } from '../src/parsers/tscn-parser.js';
+import { toolError } from '../src/errors.js';
 import { registerResourceTools } from '../src/tools/resource.js';
 
 // Helper to extract registered tool handlers from McpServer
@@ -142,12 +144,15 @@ describe('Resource MCP Tools', () => {
       expect(handlers.has('create_resource')).toBe(true);
     });
 
-    it('passes correct params to executeOperation', async () => {
+    it('passes correct params to runOperation', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
-        stdout: '{"success":true,"path":"res://materials/ground.tres","type":"StandardMaterial3D"}',
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, path: 'res://materials/ground.tres', type: 'StandardMaterial3D' },
+        stdout: '',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('create_resource')!;
@@ -159,16 +164,41 @@ describe('Resource MCP Tools', () => {
         property_types: { albedo_color: 'Color' },
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'create_resource',
         expect.objectContaining({
-          outputPath: 'materials/ground.tres',
-          resourceType: 'StandardMaterial3D',
+          output_path: 'materials/ground.tres',
+          resource_type: 'StandardMaterial3D',
           properties: { albedo_color: { r: 1, g: 0, b: 0 } },
-          propertyTypes: { albedo_color: 'Color' },
+          property_types: { albedo_color: 'Color' },
         }),
+      );
+    });
+
+    it('returns toolError when runOperation yields ok:false', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Unknown resource type: BogusResource',
+        stdout: '',
+        stderr: '',
+        exitCode: 1,
+      });
+
+      const handler = handlers.get('create_resource')!;
+      const result = await handler({
+        project_path: '/my/project',
+        output_path: 'materials/ground.tres',
+        resource_type: 'BogusResource',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Unknown resource type: BogusResource'),
+        expect.any(Array),
       );
     });
 
@@ -202,9 +232,12 @@ describe('Resource MCP Tools', () => {
     it('returns success message with output path and type', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
-        stdout: '{"success":true,"path":"res://materials/ground.tres","type":"StandardMaterial3D"}',
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, path: 'res://materials/ground.tres', type: 'StandardMaterial3D' },
+        stdout: '',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('create_resource')!;
@@ -269,12 +302,20 @@ describe('Resource MCP Tools', () => {
       expect(result.content[0].text).toContain('create_resource');
     });
 
-    it('passes correct params to executeOperation', async () => {
+    it('passes correct params to runOperation', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
-        stdout: '{"success":true,"path":"res://materials/ground.tres","type":"StandardMaterial3D","properties_set":1}',
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: {
+          success: true,
+          path: 'res://materials/ground.tres',
+          type: 'StandardMaterial3D',
+          properties_set: 1,
+        },
+        stdout: '',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('modify_resource')!;
@@ -285,7 +326,7 @@ describe('Resource MCP Tools', () => {
         property_types: { albedo_color: 'Color' },
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'modify_resource',
@@ -300,9 +341,17 @@ describe('Resource MCP Tools', () => {
     it('omits property_types when not provided', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
-        stdout: '{"success":true,"path":"res://materials/ground.tres","type":"StandardMaterial3D","properties_set":1}',
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: {
+          success: true,
+          path: 'res://materials/ground.tres',
+          type: 'StandardMaterial3D',
+          properties_set: 1,
+        },
+        stdout: '',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('modify_resource')!;
@@ -312,16 +361,24 @@ describe('Resource MCP Tools', () => {
         properties: { roughness: 0.5 },
       });
 
-      const callArgs = vi.mocked(executeOperation).mock.calls[0][3] as Record<string, unknown>;
+      const callArgs = vi.mocked(runOperation).mock.calls[0][3] as Record<string, unknown>;
       expect(callArgs).not.toHaveProperty('property_types');
     });
 
     it('returns success message with resource path', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
-        stdout: '{"success":true,"path":"res://materials/ground.tres","type":"StandardMaterial3D","properties_set":1}',
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: {
+          success: true,
+          path: 'res://materials/ground.tres',
+          type: 'StandardMaterial3D',
+          properties_set: 1,
+        },
+        stdout: '',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('modify_resource')!;
@@ -334,12 +391,15 @@ describe('Resource MCP Tools', () => {
       expect(result.content[0].text).toContain('materials/ground.tres');
     });
 
-    it('returns toolError on stderr failure', async () => {
+    it('returns toolError when runOperation yields ok:false', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Failed to load resource: res://materials/ground.tres',
         stdout: '',
         stderr: '[ERROR] Failed to load resource',
+        exitCode: 1,
       });
 
       const handler = handlers.get('modify_resource')!;
@@ -350,12 +410,16 @@ describe('Resource MCP Tools', () => {
       }) as { isError?: boolean };
 
       expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to load resource: res://materials/ground.tres'),
+        expect.any(Array),
+      );
     });
 
     it('returns toolError on exception', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockRejectedValue(new Error('Godot crashed'));
+      vi.mocked(runOperation).mockRejectedValue(new Error('Godot crashed'));
 
       const handler = handlers.get('modify_resource')!;
       const result = await handler({

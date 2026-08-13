@@ -1354,17 +1354,17 @@ func create_resource(params):
 
     # Validate the resource type exists and is a Resource subclass
     if not ClassDB.class_exists(resource_type):
-        log_error("Unknown resource type: " + resource_type)
-        quit(1)
+        fail("Unknown resource type: " + resource_type)
+        return
 
     if not ClassDB.is_parent_class(resource_type, "Resource"):
-        log_error("Type is not a Resource: " + resource_type)
-        quit(1)
+        fail("Type is not a Resource: " + resource_type)
+        return
 
     var resource = ClassDB.instantiate(resource_type)
     if resource == null:
-        log_error("Failed to instantiate resource type: " + resource_type)
-        quit(1)
+        fail("Failed to instantiate resource type: " + resource_type)
+        return
 
     # Set properties from params
     if params.has("properties"):
@@ -1389,8 +1389,7 @@ func create_resource(params):
     if error == OK:
         print(JSON.stringify({"success": true, "path": output_path, "type": resource_type}))
     else:
-        log_error("Failed to save resource: " + str(error))
-        quit(1)
+        fail("Failed to save resource: " + str(error))
 
 func modify_resource(params):
     var resource_path = ensure_res_prefix(params.get("resource_path", ""))
@@ -1398,16 +1397,14 @@ func modify_resource(params):
     var property_types = params.get("property_types", {})
 
     if resource_path == "res://":
-        log_error("Missing required parameter: resource_path")
-        print(JSON.stringify({"success": false, "error": "Missing required parameter: resource_path"}))
+        fail("Missing required parameter: resource_path")
         return
 
     log_info("Modifying resource at: " + resource_path)
 
     var resource = load(resource_path)
     if resource == null:
-        log_error("Failed to load resource: " + resource_path)
-        print(JSON.stringify({"success": false, "error": "Failed to load resource: " + resource_path}))
+        fail("Failed to load resource: " + resource_path)
         return
 
     var count = 0
@@ -1419,8 +1416,7 @@ func modify_resource(params):
 
     var error = ResourceSaver.save(resource, resource_path)
     if error != OK:
-        log_error("Failed to save resource: " + str(error))
-        print(JSON.stringify({"success": false, "error": "Failed to save resource: " + str(error)}))
+        fail("Failed to save resource: " + str(error))
         return
 
     print(JSON.stringify({"success": true, "path": resource_path, "type": resource.get_class(), "properties_set": count}))

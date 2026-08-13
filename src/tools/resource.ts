@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { join } from 'path';
 import { existsSync, readFileSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { executeOperation, validatePath } from '../godot.js';
+import { runOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 import { parseResource } from '../parsers/tscn-parser.js';
 
@@ -129,26 +129,21 @@ export function registerResourceTools(server: McpServer, ctx: ServerContext): vo
         }
 
         const params: Record<string, unknown> = {
-          outputPath: output_path,
-          resourceType: resource_type,
+          output_path: output_path,
+          resource_type: resource_type,
         };
 
         if (properties) {
           params.properties = properties;
         }
         if (property_types) {
-          params.propertyTypes = property_types;
+          params.property_types = property_types;
         }
 
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path,
-          'create_resource',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'create_resource', params);
 
-        if (stderr && stderr.includes('Failed to')) {
-          return toolError(`Failed to create resource: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to create resource: ${result.error}`, [
             'Check if the resource type is a valid Godot Resource class',
             'Ensure you have write permissions to the output path',
             'Verify the properties match the resource type',
@@ -159,7 +154,7 @@ export function registerResourceTools(server: McpServer, ctx: ServerContext): vo
           content: [
             {
               type: 'text' as const,
-              text: `Resource created successfully at: ${output_path}\nType: ${resource_type}\n\nOutput: ${stdout}`,
+              text: `Resource created successfully at: ${output_path}\nType: ${resource_type}\n\nOutput: ${JSON.stringify(result.data ?? {}, null, 2)}`,
             },
           ],
         };
@@ -235,15 +230,10 @@ export function registerResourceTools(server: McpServer, ctx: ServerContext): vo
           params.property_types = property_types;
         }
 
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path,
-          'modify_resource',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'modify_resource', params);
 
-        if (stderr && (stderr.includes('Failed to') || stderr.includes('[ERROR]'))) {
-          return toolError(`Failed to modify resource: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to modify resource: ${result.error}`, [
             'Check that the resource file exists and is valid',
             'Verify the property names match the resource type',
             'Ensure property types are correct',
@@ -254,7 +244,7 @@ export function registerResourceTools(server: McpServer, ctx: ServerContext): vo
           content: [
             {
               type: 'text' as const,
-              text: `Resource modified successfully: ${resource_path}\n\nOutput: ${stdout}`,
+              text: `Resource modified successfully: ${resource_path}\n\nOutput: ${JSON.stringify(result.data ?? {}, null, 2)}`,
             },
           ],
         };

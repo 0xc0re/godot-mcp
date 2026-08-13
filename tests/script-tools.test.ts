@@ -21,6 +21,7 @@ vi.mock('fs', async () => {
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
   executeOperation: vi.fn(),
+  runOperation: vi.fn(),
 }));
 
 // Mock errors module
@@ -32,7 +33,8 @@ vi.mock('../src/errors.js', () => ({
 }));
 
 import { existsSync } from 'fs';
-import { validatePath, executeOperation } from '../src/godot.js';
+import { validatePath, executeOperation, runOperation } from '../src/godot.js';
+import { toolError } from '../src/errors.js';
 import { registerScriptTools } from '../src/tools/script.js';
 
 // Helper to extract registered tool handlers from McpServer
@@ -79,12 +81,14 @@ describe('Script MCP Tools', () => {
       expect(handlers.has('validate_scripts')).toBe(true);
     });
 
-    it('passes correct params to executeOperation', async () => {
+    it('passes correct params to runOperation', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
         stdout: '{"results":[],"total":0,"errors":0,"valid":0}',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('validate_scripts')!;
@@ -93,12 +97,12 @@ describe('Script MCP Tools', () => {
         path_filter: 'scripts/',
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'validate_scripts',
         expect.objectContaining({
-          pathFilter: 'scripts/',
+          path_filter: 'scripts/',
         }),
       );
     });
@@ -106,9 +110,11 @@ describe('Script MCP Tools', () => {
     it('parses JSON stdout result correctly', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
         stdout: '{"results":[{"file":"res://player.gd","valid":true},{"file":"res://enemy.gd","valid":false,"error":"Parse error (code: 1)"}],"total":2,"errors":1,"valid":1}',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('validate_scripts')!;
@@ -123,9 +129,11 @@ describe('Script MCP Tools', () => {
     it('handles mixed Godot output with JSON line among INFO lines', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
         stdout: '[INFO] Operation: validate_scripts\n[INFO] Validating scripts in: res://\n{"results":[{"file":"res://main.gd","valid":true}],"total":1,"errors":0,"valid":1}\n',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('validate_scripts')!;
@@ -135,6 +143,29 @@ describe('Script MCP Tools', () => {
 
       expect(result.content[0].text).toContain('1');
       expect(result.content[0].text).toContain('0 errors');
+    });
+
+    it('returns toolError when runOperation yields ok:false', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Godot exited with code 1',
+        stdout: '',
+        stderr: '',
+        exitCode: 1,
+      });
+
+      const handler = handlers.get('validate_scripts')!;
+      const result = await handler({
+        project_path: '/my/project',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Godot exited with code 1'),
+        expect.any(Array),
+      );
     });
 
     it('returns toolError for invalid paths', async () => {
@@ -166,12 +197,14 @@ describe('Script MCP Tools', () => {
       expect(handlers.has('list_scripts')).toBe(true);
     });
 
-    it('passes correct params to executeOperation with operation "list_scripts"', async () => {
+    it('passes correct params to runOperation with operation "list_scripts"', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
         stdout: '{"scripts":[],"total":0}',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('list_scripts')!;
@@ -180,12 +213,12 @@ describe('Script MCP Tools', () => {
         path_filter: 'scripts/',
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'list_scripts',
         expect.objectContaining({
-          pathFilter: 'scripts/',
+          path_filter: 'scripts/',
         }),
       );
     });
@@ -193,9 +226,11 @@ describe('Script MCP Tools', () => {
     it('parses JSON result and returns structured script info', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
         stdout: '[INFO] Operation: list_scripts\n{"scripts":[{"path":"res://player.gd","class_name":"Player","methods":[{"name":"move","args":1}],"properties":[{"name":"speed","type":3}],"signals":[{"name":"died","args":0}]}],"total":1}',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('list_scripts')!;
@@ -209,6 +244,29 @@ describe('Script MCP Tools', () => {
       expect(result.content[0].text).toContain('1 method');
       expect(result.content[0].text).toContain('1 property');
       expect(result.content[0].text).toContain('1 signal');
+    });
+
+    it('returns toolError when runOperation yields ok:false', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Godot exited with code 1',
+        stdout: '',
+        stderr: '',
+        exitCode: 1,
+      });
+
+      const handler = handlers.get('list_scripts')!;
+      const result = await handler({
+        project_path: '/my/project',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Godot exited with code 1'),
+        expect.any(Array),
+      );
     });
 
     it('returns toolError for invalid path', async () => {
@@ -240,12 +298,14 @@ describe('Script MCP Tools', () => {
       expect(handlers.has('query_class')).toBe(true);
     });
 
-    it('passes correct params to executeOperation with operation "query_class"', async () => {
+    it('passes correct params to runOperation with operation "query_class"', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
         stdout: '{"class_name":"Node2D","parent_class":"CanvasItem","properties":[],"methods":[],"signals":[]}',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('query_class')!;
@@ -255,13 +315,13 @@ describe('Script MCP Tools', () => {
         no_inheritance: true,
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'query_class',
         expect.objectContaining({
-          className: 'Node2D',
-          noInheritance: true,
+          class_name: 'Node2D',
+          no_inheritance: true,
         }),
       );
     });
@@ -269,9 +329,11 @@ describe('Script MCP Tools', () => {
     it('parses JSON result and returns class info', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
         stdout: '[INFO] Operation: query_class\n{"class_name":"Node2D","parent_class":"CanvasItem","properties":[{"name":"position","type":5,"usage":4102}],"methods":[{"name":"get_position","return_type":5,"args":[]}],"signals":[{"name":"visibility_changed","args":[]}]}',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('query_class')!;
@@ -286,6 +348,31 @@ describe('Script MCP Tools', () => {
       expect(parsed.properties).toHaveLength(1);
       expect(parsed.methods).toHaveLength(1);
       expect(parsed.signals).toHaveLength(1);
+    });
+
+    it('returns toolError when runOperation yields ok:false (e.g. unknown class)', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Class does not exist: BogusClass',
+        data: { error: 'Class does not exist: BogusClass' },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
+
+      const handler = handlers.get('query_class')!;
+      const result = await handler({
+        project_path: '/my/project',
+        class_name: 'BogusClass',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Class does not exist: BogusClass'),
+        expect.any(Array),
+      );
     });
 
     it('returns toolError for invalid path', async () => {
