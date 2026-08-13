@@ -10,6 +10,12 @@ import { execGodot, runOperation, isGodot44OrLater, resolveWithinProject } from 
 import { toolError } from '../errors.js';
 import { withProject, outsideProjectError, opSuccess, textResult } from './common.js';
 
+/**
+ * Extended timeout for resave_resources: it re-saves every scene and script
+ * in the project, which can far exceed the default 30s on large projects.
+ */
+const RESAVE_TIMEOUT_MS = 120_000;
+
 export function registerUidTools(server: McpServer, ctx: ServerContext): void {
   // Tool 13: get_uid
   server.registerTool(
@@ -113,7 +119,9 @@ export function registerUidTools(server: McpServer, ctx: ServerContext): void {
         }
 
         const params = { project_path: project_path };
-        const result = await runOperation(ctx, project_path, 'resave_resources', params);
+        const result = await runOperation(ctx, project_path, 'resave_resources', params, {
+          timeout: RESAVE_TIMEOUT_MS,
+        });
 
         if (!result.ok) {
           return toolError(`Failed to update project UIDs: ${result.error}`, [

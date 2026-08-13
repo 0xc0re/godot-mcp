@@ -219,6 +219,8 @@ describe('UID MCP Tools', () => {
         '/proj',
         'resave_resources',
         { project_path: '/proj' },
+        // Slow-op timeout override (resave can exceed the default 30s)
+        { timeout: 120_000 },
       );
     });
 

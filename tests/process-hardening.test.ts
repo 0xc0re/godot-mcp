@@ -97,6 +97,59 @@ describe('executeOperation process hardening', () => {
     expect(options.maxBuffer).toBe(10 * 1024 * 1024);
     expect(options.timeout).toBe(30_000);
   });
+
+  it('honors a per-operation timeout override', async () => {
+    const { execFile } = await import('child_process');
+    const { executeOperation } = await import('../src/godot.js');
+
+    const ctx = createTestContext();
+
+    await executeOperation(ctx, '/project', 'resave_resources', {}, { timeout: 120_000 });
+
+    const callArgs = vi.mocked(execFile).mock.lastCall!;
+    const options = callArgs[2] as Record<string, unknown>;
+    expect(options.timeout).toBe(120_000);
+  });
+
+  it('runOperation passes the timeout override through to executeOperation', async () => {
+    const { execFile } = await import('child_process');
+    const { runOperation } = await import('../src/godot.js');
+
+    const ctx = createTestContext();
+
+    await runOperation(ctx, '/project', 'export_mesh_library', {}, { timeout: 90_000 });
+
+    const callArgs = vi.mocked(execFile).mock.lastCall!;
+    const options = callArgs[2] as Record<string, unknown>;
+    expect(options.timeout).toBe(90_000);
+  });
+
+  it('snake_cases camelCase keys inside arrays of objects (array recursion)', async () => {
+    const { execFile } = await import('child_process');
+    const { executeOperation } = await import('../src/godot.js');
+
+    const ctx = createTestContext();
+
+    await executeOperation(ctx, '/project', 'batch_set_properties', {
+      scenePath: 'scenes/main.tscn',
+      operations: [
+        { nodePath: '.', propertyName: 'collision_layer', value: 1 },
+        { nested: { innerKey: [{ deepKey: 2 }] } },
+      ],
+    });
+
+    const callArgs = vi.mocked(execFile).mock.lastCall!;
+    const args = callArgs[1] as string[];
+    const paramsJson = args[args.length - 1];
+    const params = JSON.parse(paramsJson);
+    expect(params).toEqual({
+      scene_path: 'scenes/main.tscn',
+      operations: [
+        { node_path: '.', property_name: 'collision_layer', value: 1 },
+        { nested: { inner_key: [{ deep_key: 2 }] } },
+      ],
+    });
+  });
 });
 
 describe('trackProcess', () => {

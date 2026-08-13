@@ -17,7 +17,7 @@ const execFileAsync = promisify(execFile);
 /** 10 MB max buffer for Godot process output */
 const MAX_BUFFER = 10 * 1024 * 1024;
 
-/** 30 second timeout for Godot process execution */
+/** Default 30 second timeout for Godot process execution (per-operation overrides via runOperation options). */
 const EXEC_TIMEOUT = 30_000;
 
 /** Gate for passing --debug-godot through to the engine (Task 1 convention). */
@@ -263,7 +263,26 @@ export async function execGodot(
 }
 
 /**
+ * Convert a single value for GDScript interop: recurse into arrays and
+ * plain objects (converting keys), pass scalars through unchanged.
+ *
+ * Shared by the object and array branches of convertCamelToSnakeCase so
+ * the recursion logic exists exactly once — array elements get the same
+ * key conversion as nested objects.
+ */
+function convertValueToSnakeCase(val: unknown): unknown {
+  if (Array.isArray(val)) {
+    return val.map((item) => convertValueToSnakeCase(item));
+  }
+  if (typeof val === 'object' && val !== null) {
+    return convertCamelToSnakeCase(val as OperationParams);
+  }
+  return val;
+}
+
+/**
  * Convert camelCase keys to snake_case for GDScript interop.
+ * Recurses into nested objects and arrays of objects.
  */
 function convertCamelToSnakeCase(params: OperationParams): OperationParams {
   const result: OperationParams = {};
@@ -271,13 +290,7 @@ function convertCamelToSnakeCase(params: OperationParams): OperationParams {
   for (const key in params) {
     if (Object.prototype.hasOwnProperty.call(params, key)) {
       const snakeKey = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
-      const val = params[key];
-
-      if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
-        result[snakeKey] = convertCamelToSnakeCase(val as OperationParams);
-      } else {
-        result[snakeKey] = val;
-      }
+      result[snakeKey] = convertValueToSnakeCase(params[key]);
     }
   }
 
@@ -294,6 +307,7 @@ export async function executeOperation(
   projectPath: string,
   operation: string,
   params: OperationParams,
+  options?: { timeout?: number },
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
   logger.debug(`Executing operation: ${operation} in project: ${projectPath}`);
   logger.debug(`Original operation params: ${JSON.stringify(params)}`);
@@ -319,9 +333,13 @@ export async function executeOperation(
 
   logger.debug(`Executing: ${ctx.godotPath} ${args.join(' ')}`);
 
+  // Per-operation timeout override for known-slow operations (e.g.
+  // resave_resources, export_mesh_library); defaults to EXEC_TIMEOUT (30s).
+  const timeout = options?.timeout ?? EXEC_TIMEOUT;
+
   const execPromise = execFileAsync(ctx.godotPath, args, {
     maxBuffer: MAX_BUFFER,
-    timeout: EXEC_TIMEOUT,
+    timeout,
   });
 
   try {
@@ -335,7 +353,7 @@ export async function executeOperation(
     if (error instanceof Error && 'stdout' in error && 'stderr' in error) {
       const execError = error as Error & { stdout: string; stderr: string; killed?: boolean };
       if (execError.killed) {
-        throw new Error('Godot operation timed out after 30 seconds');
+        throw new Error(`Godot operation timed out after ${timeout / 1000} seconds`);
       }
       return {
         stdout: execError.stdout ?? '',
@@ -465,9 +483,14 @@ export async function runOperation(
   params: OperationParams,
   options?: { timeout?: number },
 ): Promise<OperationResult> {
-  void options; // Reserved for future use (e.g. per-operation timeout overrides).
   try {
-    const { stdout, stderr, exitCode } = await executeOperation(ctx, projectPath, operation, params);
+    const { stdout, stderr, exitCode } = await executeOperation(
+      ctx,
+      projectPath,
+      operation,
+      params,
+      options,
+    );
     return parseOperationOutput(stdout, stderr, exitCode);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

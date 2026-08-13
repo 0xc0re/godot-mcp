@@ -481,6 +481,8 @@ describe('Scene MCP Tools', () => {
         '/my/project',
         'export_mesh_library',
         expect.objectContaining({ scenePath: 'scenes/meshes.tscn', outputPath: 'meshes.res' }),
+        // Slow-op timeout override (mesh export can exceed the default 30s)
+        { timeout: 120_000 },
       );
       expect(result.isError).toBeUndefined();
       expect(result.content[0].type).toBe('text');

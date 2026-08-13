@@ -13,6 +13,12 @@ import { withProject, outsideProjectError, opSuccess, textResult } from './commo
 import { parseScene } from '../parsers/tscn-parser.js';
 import { addNodeToScene } from '../parsers/tscn-writer.js';
 
+/**
+ * Extended timeout for export_mesh_library: mesh iteration plus preview
+ * generation can exceed the default 30s on scenes with many meshes.
+ */
+const MESH_LIBRARY_TIMEOUT_MS = 120_000;
+
 export function registerSceneTools(server: McpServer, ctx: ServerContext): void {
   // Tool 8: create_scene
   server.registerTool(
@@ -240,7 +246,9 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           params.meshItemNames = mesh_item_names;
         }
 
-        const result = await runOperation(ctx, project_path, 'export_mesh_library', params);
+        const result = await runOperation(ctx, project_path, 'export_mesh_library', params, {
+          timeout: MESH_LIBRARY_TIMEOUT_MS,
+        });
 
         if (!result.ok) {
           return toolError(`Failed to export mesh library: ${result.error}`, [
