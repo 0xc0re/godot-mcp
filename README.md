@@ -23,7 +23,7 @@ Godot MCP gives AI assistants (Claude Code, Cline, Cursor, and any other MCP cli
 | Tool | Description |
 |------|-------------|
 | `launch_editor` | Open the Godot editor for a project |
-| `run_project` | Run the project in debug mode and capture output (auto-registers the runtime helper autoloads — see [Runtime helper autoloads](#runtime-helper-autoloads)) |
+| `run_project` | Run the project in debug mode and capture output (temporarily injects the runtime helper autoload — see [Runtime helper autoloads](#runtime-helper-autoloads)) |
 | `get_debug_output` | Return the running process's captured stdout/stderr (bounded to the most recent 1000 lines) |
 | `stop_project` | Stop the running project and return its final output |
 | `capture_screenshot` | Capture the running game's viewport as a base64 PNG (auto-resized to 960×540) |
@@ -294,11 +294,13 @@ All failure paths inside `godot_operations.gd` go through a shared `fail()` help
 
 ### Runtime helper autoloads
 
-The runtime inspection tools (`inspect_scene_tree`, `inspect_node`, `inspect_group`) and `capture_screenshot` talk to the running game through two helper autoloads (`RuntimeHelper`, `ScreenshotHelper`) using file-polling IPC.
+The runtime inspection tools (`inspect_scene_tree`, `inspect_node`, `inspect_group`) and `capture_screenshot` talk to the running game through a single helper autoload (`RuntimeHelper`) using file-polling IPC. Screenshot capture is one more command on the same channel — there is no separate screenshot helper.
 
-On the first `run_project` (and `restart_project`) call for a project, the server **automatically installs these helpers**: it copies `runtime_helper.gd` and `screenshot_helper.gd` into `addons/godot_mcp/` inside your project and registers them as autoloads in `project.godot`. No manual setup is needed.
+`run_project` (and `restart_project`) **temporarily injects this helper**: it copies `runtime_helper.gd` into `.godot/mcp/` inside your project (the `.godot/` directory is Godot's own cache territory and is never committed) and adds the `RuntimeHelper` autoload entry to `project.godot`. On `stop_project` — or when the game process exits or errors — the previous `project.godot` state is **restored automatically**: the entry is removed, or if your project already had its own `RuntimeHelper` autoload, that value is put back. No manual setup, no permanent footprint.
 
-Note that this is a **permanent install**: the scripts and the two autoload entries stay in your project after the server stops — there is no automatic removal. To remove them, delete `addons/godot_mcp/` and the `RuntimeHelper`/`ScreenshotHelper` entries from the `[autoload]` section of `project.godot` (or use `remove_autoload`). The helpers are inert outside `run_project` sessions; a temporary-injection lifecycle is planned.
+If the server dies without cleanup (e.g. `kill -9`), the stale entry is harmless and self-heals: the next `run_project` detects an entry pointing at `.godot/mcp/runtime_helper.gd` as its own leftover, refreshes it, and removes it on the next stop — a duplicate is never written. To opt out entirely, pass `inject_helpers: false` to `run_project` (the runtime tools then require the game to provide its own `RuntimeHelper`).
+
+Note: `capture_screenshot` needs a rendering surface — a game launched headless returns a structured "not supported in headless mode" error instead of an image.
 
 ## Behavior Changes in 0.2.0
 
@@ -307,7 +309,7 @@ If you are upgrading from 0.1.x or scripting the server/CLI directly, note these
 - **Failures now exit 1.** Previously, many GDScript operations (`modify_node_property`, `remove_node`, `attach_script`, `save_scene`, `load_sprite`, `create_scene`, `add_node`, and others) reported failure only on stderr and exited 0 — some tools reported *success* on failed operations. All failure paths now print `{"success": false, "error": ...}` JSON and exit 1. Anything invoking `godot_operations.gd` directly and checking `$?` will now see failures it previously missed.
 - **`export_mesh_library` with no valid meshes now fails** (exit 1) instead of silently writing nothing and reporting success.
 - **`get_debug_output` is bounded**: it returns the most recent 1000 lines of output/errors rather than the full unbounded history.
-- **`capture_screenshot`** resize now runs a static, packaged GDScript (`resize_image.gd`) instead of generating a temp script at runtime, and the screenshot/runtime helpers are auto-registered on `run_project` (see above) instead of requiring manual autoload setup.
+- **`capture_screenshot`** resize now runs a static, packaged GDScript (`resize_image.gd`) instead of generating a temp script at runtime, and the runtime helper is injected temporarily on `run_project` (see above) instead of requiring manual autoload setup.
 - **Debug flags are opt-in**: the `--debug-godot` engine flag is only added when `GODOT_DEBUG=true` (it was previously always on), and server debug logging is gated by `LOG_LEVEL`/`DEBUG`.
 - **`save_scene` with `new_path: ""`** (empty string) now returns an `Invalid path` error instead of silently saving to the original path. Omit `new_path` entirely to save in place.
 - **Version is single-sourced**: the server reports the version from `package.json` (0.2.0).
@@ -343,8 +345,8 @@ If you are upgrading from 0.1.x or scripting the server/CLI directly, note these
 - **Godot Not Found**: Set the `GODOT_PATH` environment variable to your Godot executable
 - **Connection Issues**: Ensure the server is running (`./start.sh`) and restart your AI assistant
 - **Invalid Project Path**: Ensure the path points to a directory containing a `project.godot` file
-- **Build Issues**: Run `npm install` then `npm run build`; verify `build/scripts/` contains the four `.gd` files
-- **Runtime inspection times out**: The helper autoloads are registered on the first `run_project` — the game process must be started via `run_project` (not externally) for `inspect_*`/`capture_screenshot` to respond
+- **Build Issues**: Run `npm install` then `npm run build`; verify `build/scripts/` contains the three `.gd` files
+- **Runtime inspection times out**: The helper autoload is injected by `run_project` — the game process must be started via `run_project` (not externally, and not with `inject_helpers: false`) for `inspect_*`/`capture_screenshot` to respond
 - **Cursor specifically**: Ensure the server is enabled in Settings > MCP; MCP tools require the Agent chat profile
 
 ## License
