@@ -903,3 +903,664 @@ describe('restart_project', () => {
     expect(parsed.message).toContain('restarted');
   });
 });
+
+/**
+ * Shared existsSync behavior for the interaction tools (send_input,
+ * invoke_runtime, wait_for): the withProject preamble needs project.godot to
+ * exist, and triggerAndPoll polls for runtime_result.json.
+ */
+function mockFsForIpc(resultFileExists = true): void {
+  vi.mocked(existsSync).mockImplementation((path: string | unknown) => {
+    const p = String(path);
+    if (p.endsWith('project.godot')) return true;
+    if (p.endsWith('runtime_result.json')) return resultFileExists;
+    return false;
+  });
+  vi.mocked(writeFileSync).mockReturnValue(undefined);
+  vi.mocked(unlinkSync).mockReturnValue(undefined);
+}
+
+/** Extract the parsed JSON bodies of all runtime_trigger writes. */
+function triggerWrites(): Array<{ command: string; params: Record<string, unknown> }> {
+  return vi
+    .mocked(writeFileSync)
+    .mock.calls.filter(([path]) => String(path).includes('runtime_trigger'))
+    .map(([, body]) => JSON.parse(String(body)) as { command: string; params: Record<string, unknown> });
+}
+
+describe('send_input', () => {
+  let server: McpServer;
+  let ctx: ServerContext;
+  let handlers: Map<string, (params: Record<string, unknown>) => Promise<unknown>>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    server = new McpServer(
+      { name: 'test', version: '0.0.1' },
+      { capabilities: { tools: {} } },
+    );
+    ctx = createTestContext();
+    handlers = getToolHandlers(server);
+    registerRuntimeTools(server, ctx);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('registers the send_input tool', () => {
+    expect(handlers.has('send_input')).toBe(true);
+  });
+
+  it('returns error for invalid project path', async () => {
+    vi.mocked(validatePath).mockReturnValue(false);
+
+    const handler = handlers.get('send_input')!;
+    const result = (await handler({
+      project_path: '/bad/../path',
+      input: { event_type: 'action', action: 'jump' },
+    })) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+  });
+
+  it('returns error when no active process is running', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc();
+    ctx.activeProcess = null;
+
+    const handler = handlers.get('send_input')!;
+    const result = (await handler({
+      project_path: '/my/project',
+      input: { event_type: 'action', action: 'jump' },
+    })) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining('No active Godot process'),
+      expect.any(Array),
+    );
+  });
+
+  it('rejects event_type "action" without an action name before any IPC', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc();
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    const handler = handlers.get('send_input')!;
+    const result = (await handler({
+      project_path: '/my/project',
+      input: { event_type: 'action' },
+    })) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining("'action' is required"),
+      expect.any(Array),
+    );
+    expect(triggerWrites()).toHaveLength(0);
+  });
+
+  it('rejects event_type "key" without a keycode before any IPC', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc();
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    const handler = handlers.get('send_input')!;
+    const result = (await handler({
+      project_path: '/my/project',
+      input: { event_type: 'key' },
+    })) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(triggerWrites()).toHaveLength(0);
+  });
+
+  it('writes a send_input trigger and returns the helper result', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc();
+    vi.mocked(readFileSync).mockReturnValue(
+      JSON.stringify({ success: true, event_type: 'action', action: 'jump', pressed: true }),
+    );
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    const handler = handlers.get('send_input')!;
+    const resultPromise = handler({
+      project_path: '/my/project',
+      input: { event_type: 'action', action: 'jump', pressed: true },
+    });
+    await vi.advanceTimersByTimeAsync(200);
+    const result = (await resultPromise) as {
+      content: Array<{ type: string; text?: string }>;
+    };
+
+    const writes = triggerWrites();
+    expect(writes).toHaveLength(1);
+    expect(writes[0].command).toBe('send_input');
+    expect(writes[0].params).toEqual({ event_type: 'action', action: 'jump', pressed: true });
+
+    const parsed = JSON.parse(result.content[0].text!);
+    expect(parsed.success).toBe(true);
+    expect(parsed.action).toBe('jump');
+  });
+
+  it('converts a structured helper error into a tool error', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc();
+    vi.mocked(readFileSync).mockReturnValue(
+      JSON.stringify({ error: 'send_input: unknown input action: warp' }),
+    );
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    const handler = handlers.get('send_input')!;
+    const resultPromise = handler({
+      project_path: '/my/project',
+      input: { event_type: 'action', action: 'warp' },
+    });
+    await vi.advanceTimersByTimeAsync(200);
+    const result = (await resultPromise) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining('unknown input action'),
+      expect.any(Array),
+    );
+  });
+
+  it('returns a timeout error when the helper never responds', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc(false);
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    const handler = handlers.get('send_input')!;
+    const resultPromise = handler({
+      project_path: '/my/project',
+      input: { event_type: 'action', action: 'jump' },
+    });
+    await vi.advanceTimersByTimeAsync(6000);
+    const result = (await resultPromise) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining('timed out'),
+      expect.arrayContaining([expect.stringContaining('RuntimeHelper')]),
+    );
+  });
+});
+
+describe('invoke_runtime', () => {
+  let server: McpServer;
+  let ctx: ServerContext;
+  let handlers: Map<string, (params: Record<string, unknown>) => Promise<unknown>>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    server = new McpServer(
+      { name: 'test', version: '0.0.1' },
+      { capabilities: { tools: {} } },
+    );
+    ctx = createTestContext();
+    handlers = getToolHandlers(server);
+    registerRuntimeTools(server, ctx);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('registers the invoke_runtime tool', () => {
+    expect(handlers.has('invoke_runtime')).toBe(true);
+  });
+
+  it('returns error when no active process is running', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc();
+    ctx.activeProcess = null;
+
+    const handler = handlers.get('invoke_runtime')!;
+    const result = (await handler({
+      project_path: '/my/project',
+      node_path: '/root/Main',
+      operation: 'call_method',
+      method: 'reset',
+    })) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining('No active Godot process'),
+      expect.any(Array),
+    );
+  });
+
+  it('rejects an expression-like method string before any IPC (no eval surface)', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc();
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    const handler = handlers.get('invoke_runtime')!;
+    const result = (await handler({
+      project_path: '/my/project',
+      node_path: '/root/Main',
+      operation: 'call_method',
+      method: 'get_node("/root").free()',
+    })) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining('plain identifier'),
+      expect.any(Array),
+    );
+    expect(triggerWrites()).toHaveLength(0);
+  });
+
+  it('rejects an expression-like property path before any IPC (no eval surface)', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc();
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    const handler = handlers.get('invoke_runtime')!;
+    const result = (await handler({
+      project_path: '/my/project',
+      node_path: '/root/Main',
+      operation: 'set_property',
+      property: 'position.x + 100',
+      value: 1,
+    })) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(triggerWrites()).toHaveLength(0);
+  });
+
+  it('rejects set_property without a value', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc();
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    const handler = handlers.get('invoke_runtime')!;
+    const result = (await handler({
+      project_path: '/my/project',
+      node_path: '/root/Main',
+      operation: 'set_property',
+      property: 'health',
+    })) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining("'value' is required"),
+      expect.any(Array),
+    );
+    expect(triggerWrites()).toHaveLength(0);
+  });
+
+  it('writes a call_method trigger with typed args and returns the result', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc();
+    vi.mocked(readFileSync).mockReturnValue(
+      JSON.stringify({
+        success: true,
+        node_path: '/root/Main/Player',
+        method: 'bump',
+        result: 3,
+      }),
+    );
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    const handler = handlers.get('invoke_runtime')!;
+    const resultPromise = handler({
+      project_path: '/my/project',
+      node_path: '/root/Main/Player',
+      operation: 'call_method',
+      method: 'bump',
+      args: [3],
+    });
+    await vi.advanceTimersByTimeAsync(200);
+    const result = (await resultPromise) as {
+      content: Array<{ type: string; text?: string }>;
+    };
+
+    const writes = triggerWrites();
+    expect(writes).toHaveLength(1);
+    expect(writes[0].command).toBe('call_method');
+    expect(writes[0].params).toEqual({
+      node_path: '/root/Main/Player',
+      method: 'bump',
+      args: [3],
+    });
+
+    const parsed = JSON.parse(result.content[0].text!);
+    expect(parsed.success).toBe(true);
+    expect(parsed.result).toBe(3);
+  });
+
+  it('writes a set_property trigger and returns the read-back value', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc();
+    vi.mocked(readFileSync).mockReturnValue(
+      JSON.stringify({
+        success: true,
+        node_path: '/root/Main/Player',
+        property: 'position:x',
+        value: 42,
+      }),
+    );
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    const handler = handlers.get('invoke_runtime')!;
+    const resultPromise = handler({
+      project_path: '/my/project',
+      node_path: '/root/Main/Player',
+      operation: 'set_property',
+      property: 'position:x',
+      value: 42,
+    });
+    await vi.advanceTimersByTimeAsync(200);
+    const result = (await resultPromise) as {
+      content: Array<{ type: string; text?: string }>;
+    };
+
+    const writes = triggerWrites();
+    expect(writes).toHaveLength(1);
+    expect(writes[0].command).toBe('set_property');
+    expect(writes[0].params).toEqual({
+      node_path: '/root/Main/Player',
+      property: 'position:x',
+      value: 42,
+    });
+
+    const parsed = JSON.parse(result.content[0].text!);
+    expect(parsed.value).toBe(42);
+  });
+
+  it('converts a node-not-found helper error into a tool error', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc();
+    vi.mocked(readFileSync).mockReturnValue(
+      JSON.stringify({ error: 'Node not found: /root/Missing' }),
+    );
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    const handler = handlers.get('invoke_runtime')!;
+    const resultPromise = handler({
+      project_path: '/my/project',
+      node_path: '/root/Missing',
+      operation: 'call_method',
+      method: 'reset',
+    });
+    await vi.advanceTimersByTimeAsync(200);
+    const result = (await resultPromise) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining('Node not found'),
+      expect.any(Array),
+    );
+  });
+
+  it('returns a timeout error when the helper never responds', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc(false);
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    const handler = handlers.get('invoke_runtime')!;
+    const resultPromise = handler({
+      project_path: '/my/project',
+      node_path: '/root/Main',
+      operation: 'call_method',
+      method: 'reset',
+    });
+    await vi.advanceTimersByTimeAsync(6000);
+    const result = (await resultPromise) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining('timed out'),
+      expect.arrayContaining([expect.stringContaining('RuntimeHelper')]),
+    );
+  });
+});
+
+describe('wait_for', () => {
+  let server: McpServer;
+  let ctx: ServerContext;
+  let handlers: Map<string, (params: Record<string, unknown>) => Promise<unknown>>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    server = new McpServer(
+      { name: 'test', version: '0.0.1' },
+      { capabilities: { tools: {} } },
+    );
+    ctx = createTestContext();
+    handlers = getToolHandlers(server);
+    registerRuntimeTools(server, ctx);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('registers the wait_for tool', () => {
+    expect(handlers.has('wait_for')).toBe(true);
+  });
+
+  it('returns error when no active process is running', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc();
+    ctx.activeProcess = null;
+
+    const handler = handlers.get('wait_for')!;
+    const result = (await handler({
+      project_path: '/my/project',
+      condition: { type: 'node_exists', node_path: '/root/Main' },
+    })) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining('No active Godot process'),
+      expect.any(Array),
+    );
+  });
+
+  it('rejects a property condition without a value before any IPC', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc();
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    const handler = handlers.get('wait_for')!;
+    const result = (await handler({
+      project_path: '/my/project',
+      condition: { type: 'property', node_path: '/root/Main', property: 'health' },
+    })) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining("'value' is required"),
+      expect.any(Array),
+    );
+    expect(triggerWrites()).toHaveLength(0);
+  });
+
+  it('rejects an expression-like property path before any IPC (no eval surface)', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc();
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    const handler = handlers.get('wait_for')!;
+    const result = (await handler({
+      project_path: '/my/project',
+      condition: {
+        type: 'property',
+        node_path: '/root/Main',
+        property: 'position.x > 100',
+        value: true,
+      },
+    })) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(triggerWrites()).toHaveLength(0);
+  });
+
+  it('resolves when the condition becomes true on the Nth poll', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc();
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    let reads = 0;
+    vi.mocked(readFileSync).mockImplementation(() => {
+      reads += 1;
+      return JSON.stringify(
+        reads >= 3 ? { passed: true, observed: 42 } : { passed: false, observed: 0 },
+      );
+    });
+
+    const handler = handlers.get('wait_for')!;
+    const resultPromise = handler({
+      project_path: '/my/project',
+      condition: {
+        type: 'property',
+        node_path: '/root/Main/Player',
+        property: 'health',
+        op: 'eq',
+        value: 42,
+      },
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+    const result = (await resultPromise) as {
+      content: Array<{ type: string; text?: string }>;
+    };
+
+    const parsed = JSON.parse(result.content[0].text!);
+    expect(parsed.passed).toBe(true);
+    expect(parsed.observed).toBe(42);
+    expect(parsed.polls).toBe(3);
+
+    // Every poll sent a check_condition command with the structured spec
+    const writes = triggerWrites();
+    expect(writes).toHaveLength(3);
+    for (const write of writes) {
+      expect(write.command).toBe('check_condition');
+      expect(write.params.condition).toMatchObject({ type: 'property', op: 'eq', value: 42 });
+    }
+  });
+
+  it('returns a timeout error with the last observed value when the condition never passes', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc();
+    vi.mocked(readFileSync).mockReturnValue(
+      JSON.stringify({ passed: false, observed: 7 }),
+    );
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    const handler = handlers.get('wait_for')!;
+    const resultPromise = handler({
+      project_path: '/my/project',
+      condition: {
+        type: 'property',
+        node_path: '/root/Main/Player',
+        property: 'health',
+        op: 'eq',
+        value: 42,
+      },
+      timeout_ms: 500,
+      poll_interval_ms: 100,
+    });
+    await vi.advanceTimersByTimeAsync(3000);
+    const result = (await resultPromise) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining('timed out after 500ms'),
+      expect.any(Array),
+    );
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining('Last observed value: 7'),
+      expect.any(Array),
+    );
+  });
+
+  it('anchors elapsed_frames on the first poll, then passes since_frame', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc();
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    let reads = 0;
+    vi.mocked(readFileSync).mockImplementation(() => {
+      reads += 1;
+      return JSON.stringify(
+        reads >= 2 ? { passed: true, observed: 110 } : { passed: false, observed: 100 },
+      );
+    });
+
+    const handler = handlers.get('wait_for')!;
+    const resultPromise = handler({
+      project_path: '/my/project',
+      condition: { type: 'elapsed_frames', frames: 10 },
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+    const result = (await resultPromise) as {
+      content: Array<{ type: string; text?: string }>;
+    };
+
+    const writes = triggerWrites();
+    expect(writes.length).toBeGreaterThanOrEqual(2);
+    // Baseline poll carries no anchor; subsequent polls carry since_frame
+    expect(writes[0].params.condition).not.toHaveProperty('since_frame');
+    expect(writes[1].params.condition).toMatchObject({ since_frame: 100, frames: 10 });
+
+    const parsed = JSON.parse(result.content[0].text!);
+    expect(parsed.passed).toBe(true);
+    expect(parsed.observed).toBe(110);
+  });
+
+  it('surfaces a structured helper error instead of polling forever', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc();
+    vi.mocked(readFileSync).mockReturnValue(
+      JSON.stringify({ error: "check_condition: unknown op: 'between'" }),
+    );
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    const handler = handlers.get('wait_for')!;
+    const resultPromise = handler({
+      project_path: '/my/project',
+      condition: { type: 'group_count', group: 'enemies', op: 'eq', value: 0 },
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    const result = (await resultPromise) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining('wait_for condition error'),
+      expect.any(Array),
+    );
+    expect(triggerWrites()).toHaveLength(1);
+  });
+
+  it('returns a helper-unresponsive error when the IPC channel times out', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    mockFsForIpc(false);
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    const handler = handlers.get('wait_for')!;
+    const resultPromise = handler({
+      project_path: '/my/project',
+      condition: { type: 'node_exists', node_path: '/root/Main' },
+    });
+    await vi.advanceTimersByTimeAsync(6000);
+    const result = (await resultPromise) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining('RuntimeHelper did not respond'),
+      HELPER_TIMEOUT_SUGGESTIONS_MATCHER,
+    );
+  });
+});
+
+/** Matcher for the shared helper-timeout suggestion list. */
+const HELPER_TIMEOUT_SUGGESTIONS_MATCHER = expect.arrayContaining([
+  expect.stringContaining('RuntimeHelper'),
+]);
