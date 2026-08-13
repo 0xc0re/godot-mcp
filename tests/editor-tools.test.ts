@@ -53,10 +53,21 @@ vi.mock('../src/errors.js', () => ({
   })),
 }));
 
+// Mock helper-autoloads module (run_project auto-registers RuntimeHelper /
+// ScreenshotHelper; the real implementation would spawn Godot).
+vi.mock('../src/helper-autoloads.js', () => ({
+  ensureRuntimeHelperAutoloads: vi.fn(async () => ({
+    registered: [],
+    alreadyRegistered: ['RuntimeHelper', 'ScreenshotHelper'],
+    failed: [],
+  })),
+}));
+
 import { existsSync } from 'fs';
 import { spawn } from 'child_process';
 import { validatePath } from '../src/godot.js';
 import { toolError } from '../src/errors.js';
+import { ensureRuntimeHelperAutoloads } from '../src/helper-autoloads.js';
 
 // Helper to extract registered tool handlers from McpServer
 function getToolHandlers(server: McpServer): Map<string, (params: Record<string, unknown>) => Promise<unknown>> {
@@ -288,6 +299,58 @@ describe('Editor MCP Tools', () => {
 
       expect(ctx.activeProcess!.output).toContain('hello world');
       expect(ctx.activeProcess!.errors).toContain('SCRIPT ERROR: oops');
+    });
+
+    it('caps the output buffer as a bounded window (drops oldest lines)', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      const proc = createMockProcess();
+      vi.mocked(spawn).mockReturnValue(proc);
+
+      const handler = handlers.get('run_project')!;
+      await handler({ project_path: '/my/project' });
+
+      // Push 1500 lines in chunks; cap is MAX_PROCESS_OUTPUT_LINES (1000).
+      for (let chunk = 0; chunk < 15; chunk++) {
+        const lines = Array.from({ length: 100 }, (_, i) => `line-${chunk * 100 + i}`);
+        proc.stdoutListeners.get('data')!(Buffer.from(lines.join('\n')));
+      }
+
+      const output = ctx.activeProcess!.output;
+      expect(output.length).toBeLessThanOrEqual(1000);
+      // Newest line retained, oldest dropped
+      expect(output[output.length - 1]).toBe('line-1499');
+      expect(output).not.toContain('line-0');
+    });
+
+    it('auto-registers runtime helper autoloads before spawning', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(spawn).mockReturnValue(createMockProcess());
+
+      const handler = handlers.get('run_project')!;
+      await handler({ project_path: '/my/project' });
+
+      expect(ensureRuntimeHelperAutoloads).toHaveBeenCalledWith(ctx, '/my/project');
+    });
+
+    it('surfaces newly registered helper autoloads in the response text', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(spawn).mockReturnValue(createMockProcess());
+      vi.mocked(ensureRuntimeHelperAutoloads).mockResolvedValueOnce({
+        registered: ['RuntimeHelper', 'ScreenshotHelper'],
+        alreadyRegistered: [],
+        failed: [],
+      });
+
+      const handler = handlers.get('run_project')!;
+      const result = await handler({ project_path: '/my/project' }) as {
+        content: Array<{ text: string }>;
+      };
+
+      expect(result.content[0].text).toContain('RuntimeHelper');
+      expect(result.content[0].text).toContain('ScreenshotHelper');
     });
 
     it('clears activeProcess when the process exits', async () => {

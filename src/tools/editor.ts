@@ -10,7 +10,8 @@ import { spawn } from 'child_process';
 import type { ServerContext } from '../types.js';
 import { validatePath, trackProcess, parseOperationOutput } from '../godot.js';
 import { toolError } from '../errors.js';
-import { withProject, textResult } from './common.js';
+import { withProject, textResult, appendCapped } from './common.js';
+import { ensureRuntimeHelperAutoloads } from '../helper-autoloads.js';
 import { logger } from '../logger.js';
 
 /** 800KB threshold for screenshot resize (conservative limit under Claude Desktop's 1MB) */
@@ -79,6 +80,12 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
           ctx.activeProcess.process.kill();
         }
 
+        // Auto-register the runtime helper autoloads (RuntimeHelper /
+        // ScreenshotHelper) so inspect_* and capture_screenshot work without
+        // manual setup. Best-effort: a failure is surfaced in the response
+        // but never blocks the run.
+        const helpers = await ensureRuntimeHelperAutoloads(ctx, project_path);
+
         const cmdArgs = ['-d', '--path', project_path];
         if (scene && validatePath(scene)) {
           logger.debug(`Adding scene parameter: ${scene}`);
@@ -93,9 +100,11 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
         const output: string[] = [];
         const errors: string[] = [];
 
+        // Output/error buffers are bounded windows (see MAX_PROCESS_OUTPUT_LINES
+        // in common.ts): the oldest lines are dropped once the cap is reached.
         proc.stdout?.on('data', (data: Buffer) => {
           const lines = data.toString().split('\n');
-          output.push(...lines);
+          appendCapped(output, lines);
           lines.forEach((line: string) => {
             if (line.trim()) logger.debug(`[Godot stdout] ${line}`);
           });
@@ -103,7 +112,7 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
 
         proc.stderr?.on('data', (data: Buffer) => {
           const lines = data.toString().split('\n');
-          errors.push(...lines);
+          appendCapped(errors, lines);
           lines.forEach((line: string) => {
             if (line.trim()) logger.debug(`[Godot stderr] ${line}`);
           });
@@ -125,9 +134,15 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
 
         ctx.activeProcess = { process: proc, output, errors };
 
-        return textResult(
-          `Godot project started in debug mode. Use get_debug_output to see output.`,
-        );
+        let message = 'Godot project started in debug mode. Use get_debug_output to see output.';
+        if (helpers.registered.length > 0) {
+          message += ` Registered helper autoloads: ${helpers.registered.join(', ')}.`;
+        }
+        if (helpers.failed.length > 0) {
+          message += ` Warning: failed to register helper autoloads: ${helpers.failed.join('; ')}.`;
+        }
+
+        return textResult(message);
       },
     ),
   );
@@ -319,6 +334,9 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
 const RESIZE_WIDTH = 960;
 const RESIZE_HEIGHT = 540;
 
+/** Timeout for the headless resize spawn — a hung Godot must not wedge capture_screenshot. */
+const RESIZE_TIMEOUT_MS = 30_000;
+
 /**
  * Resize a screenshot PNG to 960x540 using Godot headless.
  *
@@ -353,7 +371,22 @@ function resizeScreenshot(ctx: ServerContext, imagePath: string): Promise<void> 
     proc.stdout?.on('data', (data: Buffer) => stdoutChunks.push(data.toString()));
     proc.stderr?.on('data', (data: Buffer) => stderrChunks.push(data.toString()));
 
+    // Kill the spawn if it hangs; spawn() has no built-in timeout option
+    // equivalent to execFile's, so enforce one manually.
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      proc.kill();
+    }, RESIZE_TIMEOUT_MS);
+
     proc.on('close', (code: number | null) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(
+          new Error(`Screenshot resize timed out after ${RESIZE_TIMEOUT_MS / 1000} seconds`),
+        );
+        return;
+      }
       const result = parseOperationOutput(
         stdoutChunks.join(''),
         stderrChunks.join(''),
@@ -367,6 +400,7 @@ function resizeScreenshot(ctx: ServerContext, imagePath: string): Promise<void> 
     });
 
     proc.on('error', (err: Error) => {
+      clearTimeout(timer);
       reject(err);
     });
   });

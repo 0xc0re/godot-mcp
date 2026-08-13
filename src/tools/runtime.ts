@@ -13,7 +13,8 @@ import { spawn } from 'child_process';
 import type { ServerContext } from '../types.js';
 import { validatePath, trackProcess } from '../godot.js';
 import { toolError } from '../errors.js';
-import { withProject, textResult } from './common.js';
+import { withProject, textResult, appendCapped } from './common.js';
+import { ensureRuntimeHelperAutoloads } from '../helper-autoloads.js';
 
 /** Relative path within project to the trigger file */
 const TRIGGER_PATH_SUFFIX = '.godot/runtime_trigger';
@@ -320,6 +321,10 @@ export function registerRuntimeTools(server: McpServer, ctx: ServerContext): voi
         // Clear old process state
         ctx.activeProcess = null;
 
+        // Auto-register the runtime helper autoloads before relaunching
+        // (best-effort, mirrors run_project).
+        await ensureRuntimeHelperAutoloads(ctx, project_path);
+
         // Build args for new process
         const args = ['-d', '--path', project_path];
         if (scene && validatePath(scene)) {
@@ -334,14 +339,16 @@ export function registerRuntimeTools(server: McpServer, ctx: ServerContext): voi
         const output: string[] = [];
         const errors: string[] = [];
 
+        // Bounded windows (see MAX_PROCESS_OUTPUT_LINES in common.ts):
+        // oldest lines are dropped once the cap is reached.
         proc.stdout?.on('data', (data: Buffer) => {
           const lines = data.toString().split('\n');
-          output.push(...lines);
+          appendCapped(output, lines);
         });
 
         proc.stderr?.on('data', (data: Buffer) => {
           const lines = data.toString().split('\n');
-          errors.push(...lines);
+          appendCapped(errors, lines);
         });
 
         // Mirror run_project: clear activeProcess when the process dies so

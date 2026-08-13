@@ -112,6 +112,30 @@ export function outsideProjectError(paramName: string): ToolResult {
 }
 
 /**
+ * Cap on retained stdout/stderr lines for a spawned game process
+ * (run_project / restart_project). The buffers behave as a bounded window:
+ * once the cap is reached the OLDEST lines are dropped, so get_debug_output
+ * and stop_project always return the most recent MAX_PROCESS_OUTPUT_LINES
+ * lines. Prevents unbounded memory growth from chatty games.
+ */
+export const MAX_PROCESS_OUTPUT_LINES = 1000;
+
+/**
+ * Append lines to a process output buffer, enforcing the bounded window.
+ * Mutates `buffer` in place (the buffer is shared via ctx.activeProcess).
+ */
+export function appendCapped(
+  buffer: string[],
+  lines: string[],
+  cap: number = MAX_PROCESS_OUTPUT_LINES,
+): void {
+  buffer.push(...lines);
+  if (buffer.length > cap) {
+    buffer.splice(0, buffer.length - cap);
+  }
+}
+
+/**
  * Plain text success response.
  */
 export function textResult(text: string): ToolResult {
