@@ -5,6 +5,7 @@
  * Creates the MCP server, registers tool domains, and connects stdio transport.
  */
 
+import { createRequire } from 'module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createServerContext } from './server.js';
@@ -27,8 +28,14 @@ import { registerScaffoldTools } from './tools/scaffold.js';
 import { registerGodotResources } from './resources/godot-resources.js';
 import { logger, wrapServerWithLogging } from './logger.js';
 
+// Single-source the server version from package.json. createRequire resolves
+// '../package.json' correctly from both src/ (dev) and build/ (installed).
+const { version } = createRequire(import.meta.url)('../package.json') as {
+  version: string;
+};
+
 const server = new McpServer(
-  { name: 'godot-mcp', version: '0.2.0' },
+  { name: 'godot-mcp', version },
   { capabilities: { tools: {}, resources: {} } },
 );
 

@@ -38,3 +38,19 @@ describe('Removed dependencies', () => {
     expect(packageJson.dependencies['axios']).toBeUndefined();
   });
 });
+
+describe('Server version single-sourcing', () => {
+  it('package.json version is 0.2.0', () => {
+    expect(packageJson.version).toBe('0.2.0');
+  });
+
+  it('index.ts reads the version from package.json instead of hardcoding it', () => {
+    const indexSource = readFileSync(
+      join(__dirname, '..', 'src', 'index.ts'),
+      'utf-8',
+    );
+    expect(indexSource).toContain("createRequire(import.meta.url)('../package.json')");
+    // No hardcoded semver literal passed as the server version
+    expect(indexSource).not.toMatch(/version:\s*['"]\d+\.\d+\.\d+['"]/);
+  });
+});
