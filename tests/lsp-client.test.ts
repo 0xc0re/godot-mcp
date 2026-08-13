@@ -154,6 +154,42 @@ describe('LspClient', () => {
       );
     });
 
+    it('rejects a pending request when no response arrives before the request timeout', async () => {
+      client = new LspClient();
+
+      // parseMessages never returns a response for the initialize request
+      vi.mocked(parseMessages).mockImplementation((buffer: Buffer) => ({
+        messages: [],
+        remainder: buffer,
+      }));
+
+      const connectPromise = client.connect(6014);
+      mockSocket.emit('connect');
+
+      // Advance past the 10s request timeout
+      const assertion = expect(connectPromise).rejects.toThrow(/timed out after 10000ms/);
+      await vi.advanceTimersByTimeAsync(10001);
+      await assertion;
+    });
+
+    it('rejects pending requests when the socket closes mid-request', async () => {
+      client = new LspClient();
+
+      vi.mocked(parseMessages).mockImplementation((buffer: Buffer) => ({
+        messages: [],
+        remainder: buffer,
+      }));
+
+      const connectPromise = client.connect(6014);
+      mockSocket.emit('connect');
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Server drops the connection before responding to initialize
+      const assertion = expect(connectPromise).rejects.toThrow('LSP connection closed');
+      mockSocket.emit('close');
+      await assertion;
+    });
+
     it('rejects with descriptive error on ECONNREFUSED', async () => {
       client = new LspClient();
 
@@ -323,6 +359,62 @@ describe('LspClient', () => {
         message: 'Unused variable "foo"',
         source: 'gdscript',
       });
+    });
+  });
+
+  describe('malformed frames', () => {
+    it('does not crash when the data handler receives an unparseable frame', async () => {
+      client = new LspClient();
+      await connectClient(client);
+
+      // A malformed frame makes parseMessages throw (invalid JSON body)
+      vi.mocked(parseMessages).mockImplementation(() => {
+        throw new SyntaxError('Unexpected token g in JSON at position 0');
+      });
+
+      expect(() => {
+        mockSocket.emit('data', Buffer.from('Content-Length: 7\r\n\r\ngarbage'));
+      }).not.toThrow();
+    });
+
+    it('recovers after a malformed frame and still processes later messages', async () => {
+      client = new LspClient();
+      await connectClient(client);
+
+      // First: malformed frame is dropped
+      vi.mocked(parseMessages).mockImplementation(() => {
+        throw new SyntaxError('bad frame');
+      });
+      mockSocket.emit('data', Buffer.from('Content-Length: 7\r\n\r\ngarbage'));
+
+      // Then: a valid publishDiagnostics notification arrives
+      vi.mocked(parseMessages).mockImplementation((buffer: Buffer) => {
+        const str = buffer.toString();
+        if (str.includes('publishDiagnostics')) {
+          return {
+            messages: [{
+              jsonrpc: '2.0' as const,
+              method: 'textDocument/publishDiagnostics',
+              params: { uri: 'file:///project/test.gd', diagnostics: [] },
+            }],
+            remainder: Buffer.alloc(0),
+          };
+        }
+        return { messages: [], remainder: buffer };
+      });
+
+      const diagPromise = client.getDiagnostics('/project/test.gd', 'var x = 1');
+      await vi.advanceTimersByTimeAsync(0);
+
+      const diagBody = JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'textDocument/publishDiagnostics',
+        params: { uri: 'file:///project/test.gd', diagnostics: [] },
+      });
+      mockSocket.emit('data', Buffer.from(`Content-Length: ${Buffer.byteLength(diagBody)}\r\n\r\n${diagBody}`));
+
+      const result = await diagPromise;
+      expect(result).toEqual([]);
     });
   });
 

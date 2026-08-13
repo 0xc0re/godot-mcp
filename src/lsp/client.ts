@@ -23,6 +23,9 @@ export interface Diagnostic {
 /** Timeout for collecting diagnostics after didOpen (ms) */
 const DIAGNOSTICS_TIMEOUT_MS = 5000;
 
+/** Timeout for a pending JSON-RPC request before it is rejected (ms) */
+const REQUEST_TIMEOUT_MS = 10000;
+
 /**
  * LSP client that connects to Godot's language server over TCP.
  *
@@ -55,8 +58,19 @@ export class LspClient {
     // Set up data handler for TCP stream reassembly
     this.socket.on('data', (data: Buffer) => {
       this.buffer = Buffer.concat([this.buffer, data]);
-      const { messages, remainder } = parseMessages(this.buffer);
-      this.buffer = remainder;
+
+      let messages: JsonRpcMessage[];
+      try {
+        const parsed = parseMessages(this.buffer);
+        messages = parsed.messages;
+        this.buffer = parsed.remainder;
+      } catch {
+        // Malformed frame (e.g. invalid JSON body). Drop the buffered bytes so
+        // one bad frame cannot crash the server or wedge the stream forever;
+        // any pending request will be resolved by its timeout.
+        this.buffer = Buffer.alloc(0);
+        return;
+      }
 
       for (const msg of messages) {
         if (msg.id !== undefined && this.pendingRequests.has(msg.id)) {
@@ -78,6 +92,13 @@ export class LspClient {
           }
         }
       }
+    });
+
+    // Reject any in-flight requests when the connection drops, so callers
+    // fail fast instead of hanging until their request timeout.
+    this.socket.on('close', () => {
+      this.connected = false;
+      this.rejectAllPending(new Error('LSP connection closed'));
     });
 
     // Wait for TCP connection
@@ -171,8 +192,17 @@ export class LspClient {
     this.socket = null;
     this.connected = false;
     this.buffer = Buffer.alloc(0);
-    this.pendingRequests.clear();
+    this.rejectAllPending(new Error('LSP client disconnected'));
     this.notificationListeners.clear();
+  }
+
+  /** Reject and clear every pending request (connection closed / disconnect). */
+  private rejectAllPending(error: Error): void {
+    const pending = [...this.pendingRequests.values()];
+    this.pendingRequests.clear();
+    for (const entry of pending) {
+      entry.reject(error);
+    }
   }
 
   /** Whether the client is currently connected */
@@ -186,7 +216,24 @@ export class LspClient {
   private sendRequest(method: string, params: unknown): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
-      this.pendingRequests.set(id, { resolve, reject });
+
+      // Reject the request if no response arrives in time, so a silent or
+      // wedged server cannot leave callers hanging forever.
+      const timer = setTimeout(() => {
+        this.pendingRequests.delete(id);
+        reject(new Error(`LSP request '${method}' timed out after ${REQUEST_TIMEOUT_MS}ms`));
+      }, REQUEST_TIMEOUT_MS);
+
+      this.pendingRequests.set(id, {
+        resolve: (result: unknown) => {
+          clearTimeout(timer);
+          resolve(result);
+        },
+        reject: (error: Error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
 
       const msg: JsonRpcMessage = {
         jsonrpc: '2.0',
