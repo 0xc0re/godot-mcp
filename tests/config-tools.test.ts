@@ -702,7 +702,7 @@ describe('Config MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('calls runOperation with modify_project_setting for each layer', async () => {
+    it('calls runOperation ONCE with the batched set_collision_layer_names op', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
       vi.mocked(runOperation).mockResolvedValue({
@@ -723,18 +723,19 @@ describe('Config MCP Tools', () => {
         ],
       });
 
-      expect(runOperation).toHaveBeenCalledTimes(2);
+      // ONE batched Godot spawn for all layers, not one per layer.
+      expect(runOperation).toHaveBeenCalledTimes(1);
       expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
-        'modify_project_setting',
-        { section: 'layer_names', key: '3d_physics/layer_1', value: 'Player', action: 'set' },
-      );
-      expect(runOperation).toHaveBeenCalledWith(
-        ctx,
-        '/my/project',
-        'modify_project_setting',
-        { section: 'layer_names', key: '3d_physics/layer_2', value: 'Environment', action: 'set' },
+        'set_collision_layer_names',
+        {
+          physicsType: '3d',
+          layers: [
+            { layer: 1, name: 'Player' },
+            { layer: 2, name: 'Environment' },
+          ],
+        },
       );
     });
 
@@ -763,29 +764,52 @@ describe('Config MCP Tools', () => {
       expect(parsed.success).toBe(true);
       expect(parsed.physics_type).toBe('3d');
       expect(parsed.layers_set).toEqual([
-        { layer: 1, name: 'Player', success: true },
-        { layer: 3, name: 'Enemy', success: true },
+        { layer: 1, name: 'Player' },
+        { layer: 3, name: 'Enemy' },
       ]);
     });
 
-    it('marks individual layers as failed when runOperation yields ok:false', async () => {
+    it('batches all 32 layers into a single runOperation call', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(runOperation)
-        .mockResolvedValueOnce({
-          ok: true,
-          data: { success: true },
-          stdout: '',
-          stderr: '',
-          exitCode: 0,
-        })
-        .mockResolvedValueOnce({
-          ok: false,
-          error: 'Failed to save project.godot: error code 1',
-          stdout: '',
-          stderr: '',
-          exitCode: 1,
-        });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
+
+      const layers = Array.from({ length: 32 }, (_, i) => ({
+        layer: i + 1,
+        name: `Layer${i + 1}`,
+      }));
+
+      const handler = handlers.get('set_collision_layer_names')!;
+      const result = await handler({
+        project_path: '/my/project',
+        physics_type: '2d',
+        layers,
+      }) as { content: Array<{ text: string }> };
+
+      expect(runOperation).toHaveBeenCalledTimes(1);
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.layers_set).toHaveLength(32);
+    });
+
+    it('returns toolError with the propagated op error when the batched op fails', async () => {
+      // Replaces the old per-layer failure test: the batched op is
+      // all-or-nothing, so a failure surfaces as one toolError verdict.
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Failed to save project.godot: error code 1',
+        stdout: '',
+        stderr: '',
+        exitCode: 1,
+      });
 
       const handler = handlers.get('set_collision_layer_names')!;
       const result = await handler({
@@ -795,12 +819,11 @@ describe('Config MCP Tools', () => {
           { layer: 1, name: 'Player' },
           { layer: 2, name: 'Environment' },
         ],
-      }) as { content: Array<{ text: string }> };
+      }) as { isError?: boolean; content: Array<{ text: string }> };
 
+      expect(result.isError).toBe(true);
       const parsed = JSON.parse(result.content[0].text);
-      expect(parsed.success).toBe(false);
-      expect(parsed.layers_set[0].success).toBe(true);
-      expect(parsed.layers_set[1].success).toBe(false);
+      expect(parsed.error).toContain('Failed to save project.godot: error code 1');
     });
 
     it('returns toolError when runOperation rejects unexpectedly', async () => {
@@ -907,12 +930,17 @@ describe('Config MCP Tools', () => {
       expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
-        'modify_node_property',
+        'batch_set_properties',
         {
           scenePath: 'scenes/player.tscn',
-          nodePath: '.',
-          propertyName: 'collision_layer',
-          value: 5,
+          operations: [
+            {
+              node_path: '.',
+              property_name: 'collision_layer',
+              value: 5,
+              value_type: 'int',
+            },
+          ],
         },
       );
     });
@@ -946,7 +974,7 @@ describe('Config MCP Tools', () => {
       expect(parsed.error).toContain('NonExistent');
     });
 
-    it('calls runOperation with modify_node_property for both collision_layer and collision_mask', async () => {
+    it('batches collision_layer and collision_mask into ONE batch_set_properties call', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
       vi.mocked(readFileSync).mockReturnValue('file content');
@@ -978,38 +1006,46 @@ describe('Config MCP Tools', () => {
         physics_type: '3d',
       }) as { content: Array<{ text: string }> };
 
-      expect(runOperation).toHaveBeenCalledTimes(2);
-      // collision_layer: Player = layer 1 = bit 0 = 1
+      // ONE batched Godot spawn writing both properties in a single scene save
+      // (the old two-call shape could leave layer written but mask failed).
+      expect(runOperation).toHaveBeenCalledTimes(1);
       expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
-        'modify_node_property',
+        'batch_set_properties',
         {
           scenePath: 'scenes/player.tscn',
-          nodePath: 'Player/CollisionShape3D',
-          propertyName: 'collision_layer',
-          value: 1,
-        },
-      );
-      // collision_mask: Environment = layer 2 = bit 1 = 2, Enemy = layer 3 = bit 2 = 4, combined = 6
-      expect(runOperation).toHaveBeenCalledWith(
-        ctx,
-        '/my/project',
-        'modify_node_property',
-        {
-          scenePath: 'scenes/player.tscn',
-          nodePath: 'Player/CollisionShape3D',
-          propertyName: 'collision_mask',
-          value: 6,
+          operations: [
+            // collision_layer: Player = layer 1 = bit 0 = 1
+            {
+              node_path: 'Player/CollisionShape3D',
+              property_name: 'collision_layer',
+              value: 1,
+              value_type: 'int',
+            },
+            // collision_mask: Environment = bit 1 = 2, Enemy = bit 2 = 4, combined = 6
+            {
+              node_path: 'Player/CollisionShape3D',
+              property_name: 'collision_mask',
+              value: 6,
+              value_type: 'int',
+            },
+          ],
         },
       );
 
       const parsed = JSON.parse(result.content[0].text);
       expect(parsed.success).toBe(true);
-      expect(parsed.results).toHaveLength(2);
+      expect(parsed.results).toEqual([
+        { property: 'collision_layer', bitmask: 1 },
+        { property: 'collision_mask', bitmask: 6 },
+      ]);
     });
 
-    it('marks properties as failed when runOperation yields ok:false', async () => {
+    it('returns ONE toolError verdict when the batched op fails (no partial per-property state)', async () => {
+      // Replaces the old per-property failure test: layer and mask are now
+      // written atomically in one batch_set_properties op, so a failure is a
+      // single whole-op verdict rather than "layer ok, mask failed".
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
       vi.mocked(readFileSync).mockReturnValue('file content');
@@ -1022,21 +1058,13 @@ describe('Config MCP Tools', () => {
         },
         configVersion: 5,
       });
-      vi.mocked(runOperation)
-        .mockResolvedValueOnce({
-          ok: true,
-          data: { success: true },
-          stdout: '',
-          stderr: '',
-          exitCode: 0,
-        })
-        .mockResolvedValueOnce({
-          ok: false,
-          error: 'Failed to load scene: res://scenes/player.tscn',
-          stdout: '',
-          stderr: '',
-          exitCode: 1,
-        });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Failed to load scene: res://scenes/player.tscn',
+        stdout: '',
+        stderr: '',
+        exitCode: 1,
+      });
 
       const handler = handlers.get('set_node_collision')!;
       const result = await handler({
@@ -1046,14 +1074,39 @@ describe('Config MCP Tools', () => {
         collision_layer: ['Player'],
         collision_mask: ['Environment'],
         physics_type: '3d',
-      }) as { content: Array<{ text: string }> };
+      }) as { isError?: boolean; content: Array<{ text: string }> };
 
+      expect(runOperation).toHaveBeenCalledTimes(1);
+      expect(result.isError).toBe(true);
       const parsed = JSON.parse(result.content[0].text);
-      expect(parsed.success).toBe(false);
-      expect(parsed.results).toEqual([
-        { property: 'collision_layer', bitmask: 1, success: true },
-        { property: 'collision_mask', bitmask: 2, success: false },
-      ]);
+      expect(parsed.error).toContain('Failed to load scene: res://scenes/player.tscn');
+    });
+
+    it('does not spawn Godot at all when layer names are unresolved', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('file content');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          layer_names: {
+            '3d_physics/layer_1': '"Player"',
+          },
+        },
+        configVersion: 5,
+      });
+
+      const handler = handlers.get('set_node_collision')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/player.tscn',
+        node_path: '.',
+        collision_layer: ['Player'],
+        collision_mask: ['Ghost'],
+        physics_type: '3d',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(runOperation).not.toHaveBeenCalled();
     });
 
     it('returns toolError when runOperation rejects unexpectedly', async () => {

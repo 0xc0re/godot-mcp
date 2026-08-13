@@ -209,7 +209,7 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
     {
       title: 'Set Collision Layer Names',
       description:
-        'Name collision layers in project.godot. Accepts a mapping of layer numbers (1-32) to human-readable names. Uses Godot ConfigFile API to persist changes.',
+        'Name collision layers in project.godot. Accepts a mapping of layer numbers (1-32) to human-readable names. All layers are written in a single batched Godot operation (one ConfigFile load/save).',
       inputSchema: {
         project_path: z.string().describe('Path to the Godot project directory'),
         physics_type: z
@@ -238,26 +238,26 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
       },
       async ({ project_path, physics_type, layers }) => {
         const typedLayers = layers as Array<{ layer: number; name: string }>;
-        const results: Array<{ layer: number; name: string; success: boolean }> = [];
 
-        for (const { layer, name } of typedLayers) {
-          const key = `${physics_type as string}_physics/layer_${layer}`;
-          const result = await runOperation(
-            ctx,
-            project_path,
-            'modify_project_setting',
-            { section: 'layer_names', key, value: name, action: 'set' },
-          );
+        // One batched GDScript op (single Godot spawn, single ConfigFile
+        // load/save) instead of one modify_project_setting spawn per layer.
+        const result = await runOperation(ctx, project_path, 'set_collision_layer_names', {
+          physicsType: physics_type,
+          layers: typedLayers,
+        });
 
-          results.push({ layer, name, success: result.ok });
+        if (!result.ok) {
+          return toolError(`Failed to set collision layer names: ${result.error}`, [
+            'Ensure project.godot is writable',
+            'Layer numbers must be between 1 and 32',
+          ]);
         }
 
-        const allSuccess = results.every((r) => r.success);
         return textResult(
           JSON.stringify({
-            success: allSuccess,
+            success: true,
             physics_type,
-            layers_set: results,
+            layers_set: typedLayers,
           }),
         );
       },
@@ -272,7 +272,8 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
       description:
         'Set collision layer and/or mask on a node using named layers instead of raw bitmasks. ' +
         'Resolves layer names (e.g., "Player", "Environment") to bitmask integers using the ' +
-        'layer names configured in project.godot. Avoids error-prone manual bitmask math.',
+        'layer names configured in project.godot. Avoids error-prone manual bitmask math. ' +
+        'Layer and mask are written together in one batched operation (single scene save).',
       inputSchema: {
         project_path: z.string().describe('Path to the Godot project directory'),
         scene_path: z
@@ -347,48 +348,45 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           return { bitmask, unresolved };
         };
 
-        const results: Array<{ property: string; bitmask: number; success: boolean }> = [];
+        // Resolve all names BEFORE touching the scene, then write layer and
+        // mask together via one batch_set_properties op. The old two-call
+        // shape could leave the scene inconsistent (layer written, mask
+        // failed); a single batched op writes both in one pack/save and
+        // reports one verdict.
+        const operations: Array<{
+          node_path: string;
+          property_name: string;
+          value: number;
+          value_type: string;
+        }> = [];
+        const results: Array<{ property: string; bitmask: number }> = [];
         const allUnresolved: string[] = [];
 
-        // Set collision_layer if provided
         if (collision_layer) {
-          const typedLayer = collision_layer as string[];
-          const { bitmask, unresolved } = resolveBitmask(typedLayer);
+          const { bitmask, unresolved } = resolveBitmask(collision_layer as string[]);
           allUnresolved.push(...unresolved);
           if (unresolved.length === 0) {
-            const result = await runOperation(
-              ctx,
-              project_path,
-              'modify_node_property',
-              {
-                scenePath: scene_path,
-                nodePath: node_path,
-                propertyName: 'collision_layer',
-                value: bitmask,
-              },
-            );
-            results.push({ property: 'collision_layer', bitmask, success: result.ok });
+            operations.push({
+              node_path: node_path as string,
+              property_name: 'collision_layer',
+              value: bitmask,
+              value_type: 'int',
+            });
+            results.push({ property: 'collision_layer', bitmask });
           }
         }
 
-        // Set collision_mask if provided
         if (collision_mask) {
-          const typedMask = collision_mask as string[];
-          const { bitmask, unresolved } = resolveBitmask(typedMask);
+          const { bitmask, unresolved } = resolveBitmask(collision_mask as string[]);
           allUnresolved.push(...unresolved);
           if (unresolved.length === 0) {
-            const result = await runOperation(
-              ctx,
-              project_path,
-              'modify_node_property',
-              {
-                scenePath: scene_path,
-                nodePath: node_path,
-                propertyName: 'collision_mask',
-                value: bitmask,
-              },
-            );
-            results.push({ property: 'collision_mask', bitmask, success: result.ok });
+            operations.push({
+              node_path: node_path as string,
+              property_name: 'collision_mask',
+              value: bitmask,
+              value_type: 'int',
+            });
+            results.push({ property: 'collision_mask', bitmask });
           }
         }
 
@@ -404,9 +402,21 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           );
         }
 
+        const result = await runOperation(ctx, project_path, 'batch_set_properties', {
+          scenePath: scene_path,
+          operations,
+        });
+
+        if (!result.ok) {
+          return toolError(`Failed to set node collision: ${result.error}`, [
+            'Verify the scene and node paths are correct',
+            'Ensure the node has collision_layer/collision_mask properties',
+          ]);
+        }
+
         return textResult(
           JSON.stringify({
-            success: results.every((r) => r.success),
+            success: true,
             results,
           }),
         );

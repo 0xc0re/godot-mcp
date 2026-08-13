@@ -4,6 +4,11 @@ extends SceneTree
 # Debug mode flag
 var debug_mode = false
 
+# True when running without a display server (always the case for MCP
+# operations, which are spawned with --headless). Used to append guidance
+# to resource-load failures and success payloads for visually-dependent ops.
+var is_headless: bool = DisplayServer.get_name() == "headless"
+
 # Tracks whether fail() was called, so the final quit() reports the correct
 # process exit code. NOTE: SceneTree.quit()'s exit_code argument defaults to
 # 0, so a later bare `quit()` call silently resets any earlier `quit(1)` -
@@ -58,8 +63,11 @@ func _init():
         quit(exit_code)
         return
 
-    if not params:
-        fail("Failed to parse JSON parameters: " + params_json)
+    # NOTE: an explicit null/type check, NOT `if not params:` — an empty JSON
+    # object {} parses to an empty Dictionary, which is falsy in GDScript and
+    # was previously misreported as a parse failure. {} is valid params.
+    if params == null or not params is Dictionary:
+        fail("Failed to parse JSON parameters (expected a JSON object): " + params_json)
         quit(exit_code)
         return
 
@@ -94,6 +102,8 @@ func _init():
             validate_scripts(params)
         "modify_project_setting":
             modify_project_setting(params)
+        "set_collision_layer_names":
+            set_collision_layer_names(params)
         "list_scripts":
             list_scripts(params)
         "query_class":
@@ -152,6 +162,14 @@ func fail(message: String) -> void:
     print(JSON.stringify({"success": false, "error": message}))
     log_error(message)
     exit_code = 1
+
+## Append headless-mode guidance to a resource-load failure message.
+## Many resources (textures, shaders, imported assets) may fail to load
+## without a display server; the hint makes that failure mode actionable.
+func headless_load_hint(message: String) -> String:
+    if is_headless:
+        return message + " (headless mode: resources that require import or a display server may fail to load - open the project in the editor once to import assets)"
+    return message
 
 ## Resolve a node path relative to the scene root.
 ## Handles "root", "root/Path/To/Node", and plain relative paths.
@@ -574,7 +592,7 @@ func load_sprite(params):
         print("Loading texture from: " + full_texture_path)
     var texture = load(full_texture_path)
     if not texture:
-        fail("Failed to load texture: " + full_texture_path)
+        fail(headless_load_hint("Failed to load texture: " + full_texture_path))
         return
 
     if debug_mode:
@@ -611,7 +629,10 @@ func load_sprite(params):
         return
 
     print("Sprite loaded successfully with texture: " + full_texture_path)
-    print(JSON.stringify({"success": true, "node_path": params.node_path, "texture_path": full_texture_path}))
+    var sprite_result = {"success": true, "node_path": params.node_path, "texture_path": full_texture_path}
+    if is_headless:
+        sprite_result["warning"] = "Saved in headless mode - texture data may be incomplete. Verify visually in the editor."
+    print(JSON.stringify(sprite_result))
 
 # Export a scene as a MeshLibrary resource
 func export_mesh_library(params):
@@ -649,17 +670,17 @@ func export_mesh_library(params):
         print("Loading scene from: " + full_scene_path)
     var scene = load(full_scene_path)
     if not scene:
-        fail("Failed to load scene: " + full_scene_path)
+        fail(headless_load_hint("Failed to load scene: " + full_scene_path))
         return
-    
+
     if debug_mode:
         print("Scene loaded successfully")
-    
+
     # Instance the scene
     var scene_root = scene.instantiate()
     if debug_mode:
         print("Scene instantiated")
-    
+
     # Create a new MeshLibrary
     var mesh_library = MeshLibrary.new()
     if debug_mode:
@@ -778,7 +799,10 @@ func export_mesh_library(params):
         return
 
     print("MeshLibrary exported successfully with " + str(item_id) + " items to: " + full_output_path)
-    print(JSON.stringify({"success": true, "output_path": full_output_path, "item_count": item_id}))
+    var mesh_lib_result = {"success": true, "output_path": full_output_path, "item_count": item_id}
+    if is_headless:
+        mesh_lib_result["warning"] = "Exported in headless mode - item previews may be missing or incomplete. Verify in the editor."
+    print(JSON.stringify(mesh_lib_result))
 
 # Find files with a specific extension recursively
 func find_files(path, extension):
@@ -1363,7 +1387,10 @@ func create_resource(params):
 
     var resource = ClassDB.instantiate(resource_type)
     if resource == null:
-        fail("Failed to instantiate resource type: " + resource_type)
+        var inst_err = "Failed to instantiate resource type: " + resource_type
+        if is_headless:
+            inst_err += " (headless mode: display-dependent resource types may not instantiate without a display server)"
+        fail(inst_err)
         return
 
     # Set properties from params
@@ -1387,7 +1414,10 @@ func create_resource(params):
 
     var error = ResourceSaver.save(resource, output_path)
     if error == OK:
-        print(JSON.stringify({"success": true, "path": output_path, "type": resource_type}))
+        var resource_result = {"success": true, "path": output_path, "type": resource_type}
+        if is_headless:
+            resource_result["warning"] = "Created in headless mode - visual properties are not verified without a display server."
+        print(JSON.stringify(resource_result))
     else:
         fail("Failed to save resource: " + str(error))
 
@@ -1513,6 +1543,53 @@ func modify_project_setting(params):
         "section": section,
         "key": key,
         "action": action
+    }))
+
+# Set multiple collision layer names in project.godot in ONE ConfigFile
+# load/save (replaces the old shape of one modify_project_setting spawn per
+# layer - up to 32 sequential Godot processes). All-or-nothing: any invalid
+# entry fails the whole operation before anything is written.
+func set_collision_layer_names(params):
+    var physics_type = params.get("physics_type", "3d")
+    var layers = params.get("layers", [])
+
+    if physics_type != "2d" and physics_type != "3d":
+        fail("Invalid physics_type: " + str(physics_type) + " (expected \"2d\" or \"3d\")")
+        return
+
+    if not layers is Array or layers.is_empty():
+        fail("Missing required parameter: layers (non-empty array of {layer, name})")
+        return
+
+    var config = ConfigFile.new()
+    var err = config.load("res://project.godot")
+    if err != OK:
+        fail("Failed to load project.godot: error code " + str(err))
+        return
+
+    var layers_set = []
+    for entry in layers:
+        if not entry is Dictionary or not entry.has("layer") or not entry.has("name"):
+            fail("Invalid layer entry (expected {layer, name}): " + str(entry))
+            return
+        var layer_num = int(entry.layer)
+        if layer_num < 1 or layer_num > 32:
+            fail("Layer number out of range (1-32): " + str(layer_num))
+            return
+        var key = physics_type + "_physics/layer_" + str(layer_num)
+        config.set_value("layer_names", key, str(entry.name))
+        layers_set.append({"layer": layer_num, "name": str(entry.name)})
+
+    err = config.save("res://project.godot")
+    if err != OK:
+        fail("Failed to save project.godot: error code " + str(err))
+        return
+
+    log_info("Set " + str(layers_set.size()) + " collision layer name(s) in one save")
+    print(JSON.stringify({
+        "success": true,
+        "physics_type": physics_type,
+        "layers_set": layers_set
     }))
 
 # List all GDScript files in a project with introspection data
@@ -1761,7 +1838,7 @@ func instance_scene(params):
     # Load the parent scene
     var scene = load(full_scene_path)
     if not scene:
-        fail("Failed to load scene: " + full_scene_path)
+        fail(headless_load_hint("Failed to load scene: " + full_scene_path))
         return
 
     var scene_root = scene.instantiate()
@@ -1775,7 +1852,7 @@ func instance_scene(params):
     # Load child scene
     var child_packed = load(ensure_res_prefix(params.child_scene_path)) as PackedScene
     if not child_packed:
-        fail("Failed to load child scene: " + params.child_scene_path)
+        fail(headless_load_hint("Failed to load child scene: " + params.child_scene_path))
         return
 
     var child_instance = child_packed.instantiate()
@@ -1802,12 +1879,15 @@ func instance_scene(params):
         fail("Failed to save scene: " + str(save_error))
         return
 
-    print(JSON.stringify({
+    var instance_result = {
         "success": true,
         "instanced": params.child_scene_path,
         "parent": params.parent_node_path,
         "name": child_instance.name
-    }))
+    }
+    if is_headless:
+        instance_result["warning"] = "Instanced in headless mode - visual layout is not verified without a display server."
+    print(JSON.stringify(instance_result))
 
 # Batch set properties on multiple nodes in a single scene save
 func batch_set_properties(params):
@@ -1986,7 +2066,7 @@ func create_shader_material(params):
 
     var shader = load(shader_path) as Shader
     if shader == null:
-        fail("Failed to load shader: " + shader_path)
+        fail(headless_load_hint("Failed to load shader: " + shader_path))
         return
 
     var material = ShaderMaterial.new()
@@ -2011,7 +2091,10 @@ func create_shader_material(params):
         fail("Failed to save shader material: " + str(error))
         return
 
-    print(JSON.stringify({"success": true, "path": output_path}))
+    var material_result = {"success": true, "path": output_path}
+    if is_headless:
+        material_result["warning"] = "Created in headless mode - shader compilation is not verified without a display server. Verify in the editor."
+    print(JSON.stringify(material_result))
 
 # Set shader parameters on an existing ShaderMaterial resource
 func set_shader_params(params):
@@ -2251,7 +2334,6 @@ func create_tileset(params):
     var margin_y = int(params.get("margin_y", 0))
     var columns = int(params.get("columns", 0))
     var rows = int(params.get("rows", 0))
-    var is_headless = DisplayServer.get_name() == "headless"
 
     if output_path == "res://" or texture_path == "res://":
         fail("Missing required parameters: output_path and texture_path")
@@ -2346,7 +2428,7 @@ func paint_tilemap(params):
     # Load the scene
     var scene = load(scene_path)
     if not scene:
-        fail("Failed to load scene: " + scene_path)
+        fail(headless_load_hint("Failed to load scene: " + scene_path))
         return
 
     var scene_root = scene.instantiate()
@@ -2416,4 +2498,6 @@ func paint_tilemap(params):
         fail("Failed to save scene: " + str(save_error))
         return
 
+    if is_headless:
+        result_json["warning"] = "Painted in headless mode - tile visuals are not verified without a display server. Confirm in the editor."
     print(JSON.stringify(result_json))
