@@ -47,9 +47,18 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           return outsideProjectError('scene_path');
         }
 
+        const rootNodeType = root_node_type || 'Node2D';
+        // Class names only — a path here (e.g. "res://evil.gd") would reach
+        // instantiate_class in GDScript, which must never load raw scripts.
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(rootNodeType)) {
+          return toolError(`Invalid root_node_type: ${rootNodeType}`, [
+            'root_node_type must be a Godot class name (no paths, no file extensions)',
+          ]);
+        }
+
         const params = {
           scenePath: scene_path,
-          rootNodeType: root_node_type || 'Node2D',
+          rootNodeType,
         };
 
         const result = await runOperation(ctx, project_path, 'create_scene', params);

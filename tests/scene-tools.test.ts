@@ -900,6 +900,16 @@ describe('Scene MCP Tools', () => {
       expect(runOperation).not.toHaveBeenCalled();
     });
 
+    it('create_scene rejects a script path as root_node_type (arbitrary instantiation guard)', async () => {
+      await expectPathRejected('create_scene', { project_path: '/proj', scene_path: 'scenes/main.tscn', root_node_type: 'res://evil.gd' }, 'root_node_type');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('create_scene rejects a non-identifier root_node_type', async () => {
+      await expectPathRejected('create_scene', { project_path: '/proj', scene_path: 'scenes/main.tscn', root_node_type: 'Node2D; evil' }, 'root_node_type');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
     it('add_node rejects scene_path traversal before touching the scene file', async () => {
       await expectPathRejected('add_node', { project_path: '/proj', scene_path: '../out.tscn', node_type: 'Node2D', node_name: 'N' }, 'scene_path');
       expect(writeFileSync).not.toHaveBeenCalled();

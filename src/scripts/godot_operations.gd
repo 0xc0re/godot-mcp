@@ -185,25 +185,14 @@ func find_node_by_path(scene_root: Node, node_path: String) -> Node:
         target = scene_root.get_node_or_null(node_path)
     return target
 
-# Get a script by name or path
+# Get a script by registered class name.
+# Only looks up names via the project's global class registry. Raw paths
+# (e.g. "res://evil.gd") are intentionally not accepted here to prevent
+# arbitrary script instantiation from agent-supplied input.
 func get_script_by_name(name_of_class):
     if debug_mode:
         print("Attempting to get script for class: " + name_of_class)
-    
-    # Try to load it directly if it's a resource path
-    if ResourceLoader.exists(name_of_class, "Script"):
-        if debug_mode:
-            print("Resource exists, loading directly: " + name_of_class)
-        var script = load(name_of_class) as Script
-        if script:
-            if debug_mode:
-                print("Successfully loaded script from path")
-            return script
-        else:
-            printerr("Failed to load script from path: " + name_of_class)
-    elif debug_mode:
-        print("Resource not found, checking global class registry")
-    
+
     # Search for it in the global class registry if it's a class name
     var global_classes = ProjectSettings.get_global_class_list()
     if debug_mode:
@@ -482,7 +471,13 @@ func add_node(params):
         for property in properties:
             if debug_mode:
                 print("Setting property: " + property + " = " + str(properties[property]))
-            new_node.set(property, properties[property])
+            var value = properties[property]
+            if typeof(value) == TYPE_STRING and value.begins_with("res://"):
+                value = load(value)
+                if debug_mode:
+                    print("Loaded resource for property: " + property + " -> " + str(value))
+            new_node.set(property, value)
+
 
     parent.add_child(new_node)
     new_node.owner = scene_root
