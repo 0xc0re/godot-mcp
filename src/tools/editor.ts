@@ -11,6 +11,7 @@ import type { ServerContext } from '../types.js';
 import { validatePath, trackProcess, parseOperationOutput } from '../godot.js';
 import { toolError } from '../errors.js';
 import { withProject, textResult } from './common.js';
+import { logger } from '../logger.js';
 
 /** 800KB threshold for screenshot resize (conservative limit under Claude Desktop's 1MB) */
 const SCREENSHOT_SIZE_THRESHOLD = 800 * 1024;
@@ -20,14 +21,6 @@ const SCREENSHOT_TIMEOUT_MS = 5000;
 
 /** 100ms polling interval for screenshot file */
 const SCREENSHOT_POLL_MS = 100;
-
-const DEBUG_MODE: boolean = process.env.DEBUG === 'true';
-
-function logDebug(message: string): void {
-  if (DEBUG_MODE) {
-    console.error(`[DEBUG] ${message}`);
-  }
-}
 
 export function registerEditorTools(server: McpServer, ctx: ServerContext): void {
   // Tool 1: launch_editor
@@ -45,7 +38,7 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
         catchPrefix: 'Failed to launch Godot editor',
       },
       async ({ project_path }) => {
-        logDebug(`Launching Godot editor for project: ${project_path}`);
+        logger.debug(`Launching Godot editor for project: ${project_path}`);
         const proc = trackProcess(
           ctx,
           spawn(ctx.godotPath, ['-e', '--path', project_path], {
@@ -82,17 +75,17 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
       async ({ project_path, scene }) => {
         // Kill any existing active process
         if (ctx.activeProcess) {
-          logDebug('Killing existing Godot process before starting a new one');
+          logger.debug('Killing existing Godot process before starting a new one');
           ctx.activeProcess.process.kill();
         }
 
         const cmdArgs = ['-d', '--path', project_path];
         if (scene && validatePath(scene)) {
-          logDebug(`Adding scene parameter: ${scene}`);
+          logger.debug(`Adding scene parameter: ${scene}`);
           cmdArgs.push(scene);
         }
 
-        logDebug(`Running Godot project: ${project_path}`);
+        logger.debug(`Running Godot project: ${project_path}`);
         const proc = trackProcess(
           ctx,
           spawn(ctx.godotPath, cmdArgs, { stdio: 'pipe' }),
@@ -104,7 +97,7 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
           const lines = data.toString().split('\n');
           output.push(...lines);
           lines.forEach((line: string) => {
-            if (line.trim()) logDebug(`[Godot stdout] ${line}`);
+            if (line.trim()) logger.debug(`[Godot stdout] ${line}`);
           });
         });
 
@@ -112,12 +105,12 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
           const lines = data.toString().split('\n');
           errors.push(...lines);
           lines.forEach((line: string) => {
-            if (line.trim()) logDebug(`[Godot stderr] ${line}`);
+            if (line.trim()) logger.debug(`[Godot stderr] ${line}`);
           });
         });
 
         proc.on('exit', (code: number | null) => {
-          logDebug(`Godot process exited with code ${code}`);
+          logger.debug(`Godot process exited with code ${code}`);
           if (ctx.activeProcess && ctx.activeProcess.process === proc) {
             ctx.activeProcess = null;
           }
@@ -187,7 +180,7 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
         ]);
       }
 
-      logDebug('Stopping active Godot process');
+      logger.debug('Stopping active Godot process');
       ctx.activeProcess.process.kill();
       const output = ctx.activeProcess.output;
       const errors = ctx.activeProcess.errors;
@@ -244,7 +237,7 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
 
       try {
         // Write trigger file to signal the GDScript helper
-        logDebug(`Writing screenshot trigger: ${triggerPath}`);
+        logger.debug(`Writing screenshot trigger: ${triggerPath}`);
         writeFileSync(triggerPath, '');
 
         // Poll for the output PNG file
@@ -267,10 +260,10 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
         // Check file size and resize if needed
         let fileSize = statSync(outputPath).size;
         if (fileSize > SCREENSHOT_SIZE_THRESHOLD) {
-          logDebug(`Screenshot is ${fileSize} bytes, resizing to 960x540`);
+          logger.debug(`Screenshot is ${fileSize} bytes, resizing to 960x540`);
           await resizeScreenshot(ctx, outputPath);
           fileSize = statSync(outputPath).size;
-          logDebug(`Resized screenshot is ${fileSize} bytes`);
+          logger.debug(`Resized screenshot is ${fileSize} bytes`);
         }
 
         // Read and encode the screenshot

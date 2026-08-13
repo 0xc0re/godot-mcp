@@ -10,6 +10,7 @@ import { execFile, type ChildProcess } from 'child_process';
 import { normalize, resolve, relative, isAbsolute, dirname } from 'path';
 import { promisify } from 'util';
 import type { ServerContext, OperationParams } from './types.js';
+import { logger } from './logger.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -19,15 +20,8 @@ const MAX_BUFFER = 10 * 1024 * 1024;
 /** 30 second timeout for Godot process execution */
 const EXEC_TIMEOUT = 30_000;
 
-// Check if debug mode is enabled
-const DEBUG_MODE: boolean = process.env.DEBUG === 'true';
+/** Gate for passing --debug-godot through to the engine (Task 1 convention). */
 const GODOT_DEBUG_MODE: boolean = process.env.GODOT_DEBUG === 'true';
-
-function logDebug(message: string): void {
-  if (DEBUG_MODE) {
-    console.error(`[DEBUG] ${message}`);
-  }
-}
 
 /**
  * Validate a path to prevent path traversal attacks.
@@ -141,21 +135,21 @@ export async function isValidGodotPath(
   }
 
   try {
-    logDebug(`Validating Godot path: ${path}`);
+    logger.debug(`Validating Godot path: ${path}`);
 
     if (path !== 'godot' && !existsSync(path)) {
-      logDebug(`Path does not exist: ${path}`);
+      logger.debug(`Path does not exist: ${path}`);
       cache?.set(path, false);
       return false;
     }
 
     await execFileAsync(path, ['--version']);
 
-    logDebug(`Valid Godot path: ${path}`);
+    logger.debug(`Valid Godot path: ${path}`);
     cache?.set(path, true);
     return true;
   } catch {
-    logDebug(`Invalid Godot path: ${path}`);
+    logger.debug(`Invalid Godot path: ${path}`);
     cache?.set(path, false);
     return false;
   }
@@ -171,17 +165,17 @@ export async function detectGodotPath(
   // Check environment variable first
   if (process.env.GODOT_PATH) {
     const normalizedPath = normalize(process.env.GODOT_PATH);
-    logDebug(`Checking GODOT_PATH environment variable: ${normalizedPath}`);
+    logger.debug(`Checking GODOT_PATH environment variable: ${normalizedPath}`);
     if (await isValidGodotPath(normalizedPath, cache)) {
-      logDebug(`Using Godot path from environment: ${normalizedPath}`);
+      logger.debug(`Using Godot path from environment: ${normalizedPath}`);
       return normalizedPath;
     }
-    logDebug(`GODOT_PATH environment variable is invalid`);
+    logger.debug(`GODOT_PATH environment variable is invalid`);
   }
 
   // Auto-detect based on platform
   const osPlatform = process.platform;
-  logDebug(`Auto-detecting Godot path for platform: ${osPlatform}`);
+  logger.debug(`Auto-detecting Godot path for platform: ${osPlatform}`);
 
   const possiblePaths: string[] = ['godot'];
 
@@ -213,7 +207,7 @@ export async function detectGodotPath(
   for (const p of possiblePaths) {
     const normalizedPath = normalize(p);
     if (await isValidGodotPath(normalizedPath, cache)) {
-      logDebug(`Found Godot at: ${normalizedPath}`);
+      logger.debug(`Found Godot at: ${normalizedPath}`);
       return normalizedPath;
     }
   }
@@ -301,11 +295,11 @@ export async function executeOperation(
   operation: string,
   params: OperationParams,
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  logDebug(`Executing operation: ${operation} in project: ${projectPath}`);
-  logDebug(`Original operation params: ${JSON.stringify(params)}`);
+  logger.debug(`Executing operation: ${operation} in project: ${projectPath}`);
+  logger.debug(`Original operation params: ${JSON.stringify(params)}`);
 
   const snakeCaseParams = convertCamelToSnakeCase(params);
-  logDebug(`Converted snake_case params: ${JSON.stringify(snakeCaseParams)}`);
+  logger.debug(`Converted snake_case params: ${JSON.stringify(snakeCaseParams)}`);
 
   const paramsJson = JSON.stringify(snakeCaseParams);
 
@@ -323,7 +317,7 @@ export async function executeOperation(
     args.push('--debug-godot');
   }
 
-  logDebug(`Executing: ${ctx.godotPath} ${args.join(' ')}`);
+  logger.debug(`Executing: ${ctx.godotPath} ${args.join(' ')}`);
 
   const execPromise = execFileAsync(ctx.godotPath, args, {
     maxBuffer: MAX_BUFFER,

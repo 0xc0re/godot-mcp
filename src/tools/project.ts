@@ -11,15 +11,8 @@ import type { ServerContext } from '../types.js';
 import { execGodot, runOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 import { withProject, textResult } from './common.js';
+import { logger } from '../logger.js';
 import { parseProjectSettings } from '../parsers/project-parser.js';
-
-const DEBUG_MODE: boolean = process.env.DEBUG === 'true';
-
-function logDebug(message: string): void {
-  if (DEBUG_MODE) {
-    console.error(`[DEBUG] ${message}`);
-  }
-}
 
 /**
  * Find Godot projects in a directory.
@@ -64,7 +57,7 @@ function findGodotProjects(
       }
     }
   } catch (error) {
-    logDebug(`Error searching directory ${directory}: ${error}`);
+    logger.debug(`Error searching directory ${directory}: ${error}`);
   }
 
   return projects;
@@ -110,7 +103,7 @@ function getProjectStructureAsync(projectPath: string): {
 
     scanDirectory(projectPath);
   } catch (error) {
-    logDebug(`Error getting project structure: ${error}`);
+    logger.debug(`Error getting project structure: ${error}`);
   }
 
   return structure;
@@ -126,7 +119,7 @@ export function registerProjectTools(server: McpServer, ctx: ServerContext): voi
     },
     async () => {
       try {
-        logDebug('Getting Godot version');
+        logger.debug('Getting Godot version');
         const { stdout } = await execGodot(ctx.godotPath, ['--version']);
         return {
           content: [{ type: 'text' as const, text: stdout.trim() }],
@@ -163,7 +156,7 @@ export function registerProjectTools(server: McpServer, ctx: ServerContext): voi
       }
 
       try {
-        logDebug(`Listing Godot projects in directory: ${directory}`);
+        logger.debug(`Listing Godot projects in directory: ${directory}`);
         if (!existsSync(directory)) {
           return toolError(`Directory does not exist: ${directory}`, [
             'Provide a valid directory path that exists on the system',
@@ -205,7 +198,7 @@ export function registerProjectTools(server: McpServer, ctx: ServerContext): voi
       },
       async ({ project_path }) => {
         const projectFile = join(project_path, 'project.godot');
-        logDebug(`Getting project info for: ${project_path}`);
+        logger.debug(`Getting project info for: ${project_path}`);
 
         const { stdout } = await execGodot(ctx.godotPath, ['--version']);
         const projectStructure = getProjectStructureAsync(project_path);
@@ -216,10 +209,10 @@ export function registerProjectTools(server: McpServer, ctx: ServerContext): voi
           const configNameMatch = projectFileContent.match(/config\/name="([^"]+)"/);
           if (configNameMatch && configNameMatch[1]) {
             projectName = configNameMatch[1];
-            logDebug(`Found project name in config: ${projectName}`);
+            logger.debug(`Found project name in config: ${projectName}`);
           }
         } catch (error) {
-          logDebug(`Error reading project file: ${error}`);
+          logger.debug(`Error reading project file: ${error}`);
         }
 
         return textResult(
@@ -264,7 +257,7 @@ export function registerProjectTools(server: McpServer, ctx: ServerContext): voi
       },
       async ({ project_path, section }) => {
         const projectFile = join(project_path, 'project.godot');
-        logDebug(`Reading project settings from: ${projectFile}`);
+        logger.debug(`Reading project settings from: ${projectFile}`);
         const content = readFileSync(projectFile, 'utf8');
         const parsed = parseProjectSettings(content);
 
@@ -310,7 +303,7 @@ export function registerProjectTools(server: McpServer, ctx: ServerContext): voi
         ],
       },
       async ({ project_path, section, key, value, action }) => {
-        logDebug(`Modifying project setting: [${section}] ${key}`);
+        logger.debug(`Modifying project setting: [${section}] ${key}`);
 
         const result = await runOperation(
           ctx,
