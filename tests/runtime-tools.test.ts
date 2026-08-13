@@ -1564,3 +1564,172 @@ describe('wait_for', () => {
 const HELPER_TIMEOUT_SUGGESTIONS_MATCHER = expect.arrayContaining([
   expect.stringContaining('RuntimeHelper'),
 ]);
+
+describe('triggerAndPoll serialization (shared IPC channel)', () => {
+  let server: McpServer;
+  let ctx: ServerContext;
+  let handlers: Map<string, (params: Record<string, unknown>) => Promise<unknown>>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    server = new McpServer(
+      { name: 'test', version: '0.0.1' },
+      { capabilities: { tools: {} } },
+    );
+    ctx = createTestContext();
+    handlers = getToolHandlers(server);
+    registerRuntimeTools(server, ctx);
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+    vi.mocked(validatePath).mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /**
+   * Simulate the REAL single-slot IPC disk: ONE trigger file and ONE result
+   * file shared by every command. A simulated helper picks up the trigger
+   * ~150ms after it is written and responds to whatever command is on the
+   * file at that moment — exactly like runtime_helper.gd's 0.5s poll. A
+   * second trigger written while one is pending overwrites it (counted in
+   * `overwrites`), which is the destructive interleaving the serialization
+   * exists to prevent.
+   */
+  function installIpcDiskSim(
+    respond: (command: string) => Record<string, unknown> | null,
+  ): { responded: string[]; overwrites: number } {
+    const state = {
+      trigger: null as string | null,
+      result: null as string | null,
+      responded: [] as string[],
+      overwrites: 0,
+    };
+    vi.mocked(existsSync).mockImplementation((path: string | unknown) => {
+      const p = String(path);
+      if (p.endsWith('project.godot')) return true;
+      if (p.endsWith('runtime_result.json')) return state.result !== null;
+      if (p.endsWith('runtime_trigger')) return state.trigger !== null;
+      return false;
+    });
+    vi.mocked(writeFileSync).mockImplementation((path, body) => {
+      if (!String(path).includes('runtime_trigger')) return;
+      if (state.trigger !== null) state.overwrites += 1;
+      state.trigger = String(body);
+      setTimeout(() => {
+        if (state.trigger === null) return;
+        const { command } = JSON.parse(state.trigger) as { command: string };
+        const response = respond(command);
+        if (response === null) return; // helper never answers this command
+        state.trigger = null;
+        state.result = JSON.stringify(response);
+        state.responded.push(command);
+      }, 150);
+    });
+    vi.mocked(unlinkSync).mockImplementation((path) => {
+      const p = String(path);
+      if (p.endsWith('runtime_trigger')) state.trigger = null;
+      if (p.endsWith('runtime_result.json')) state.result = null;
+    });
+    vi.mocked(readFileSync).mockImplementation(() => state.result ?? '');
+    return state;
+  }
+
+  it('send_input during a wait_for loop never cross-reads the other command result', async () => {
+    const state = installIpcDiskSim((command) => {
+      if (command === 'check_condition') return { passed: false, observed: 1 };
+      if (command === 'send_input') {
+        return { success: true, event_type: 'action', action: 'jump', pressed: true };
+      }
+      return { error: `unexpected command: ${command}` };
+    });
+
+    // wait_for loops on the channel while send_input arrives concurrently —
+    // the reviewer's failure scenario: without serialization, send_input can
+    // read a check_condition body ({passed, observed} has no "error" key) as
+    // its own SUCCESS.
+    const waitPromise = handlers.get('wait_for')!({
+      project_path: '/my/project',
+      condition: {
+        type: 'property',
+        node_path: '/root/Main',
+        property: 'health',
+        op: 'eq',
+        value: 42,
+      },
+      timeout_ms: 1200,
+      poll_interval_ms: 100,
+    });
+    const sendPromise = handlers.get('send_input')!({
+      project_path: '/my/project',
+      input: { event_type: 'action', action: 'jump' },
+    });
+
+    await vi.advanceTimersByTimeAsync(10000);
+    const sendResult = (await sendPromise) as {
+      isError?: boolean;
+      content: Array<{ type: string; text?: string }>;
+    };
+    const waitResult = (await waitPromise) as { isError?: boolean };
+
+    // send_input got ITS OWN body — never the check_condition shape
+    expect(sendResult.isError).not.toBe(true);
+    const sendParsed = JSON.parse(sendResult.content[0].text!);
+    expect(sendParsed).toMatchObject({ success: true, event_type: 'action', action: 'jump' });
+    expect(sendParsed).not.toHaveProperty('passed');
+    expect(sendParsed).not.toHaveProperty('observed');
+
+    // wait_for timed out on its OWN condition, reporting its own observed
+    // value — not the send_input body
+    expect(waitResult.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining('Last observed value: 1'),
+      expect.any(Array),
+    );
+
+    // Serialization proof: no trigger was ever overwritten while pending,
+    // and the helper answered every command that was sent
+    expect(state.overwrites).toBe(0);
+    expect(state.responded).toContain('send_input');
+    expect(state.responded.filter((c) => c === 'check_condition').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('a timed-out request surfaces as a timeout error and does not wedge the channel', async () => {
+    installIpcDiskSim((command) => {
+      if (command === 'send_input') {
+        return { success: true, event_type: 'action', action: 'jump', pressed: true };
+      }
+      return null; // helper never answers check_condition — lost/ignored trigger
+    });
+
+    const waitPromise = handlers.get('wait_for')!({
+      project_path: '/my/project',
+      condition: { type: 'node_exists', node_path: '/root/Main' },
+    });
+    const sendPromise = handlers.get('send_input')!({
+      project_path: '/my/project',
+      input: { event_type: 'action', action: 'jump' },
+    });
+
+    await vi.advanceTimersByTimeAsync(15000);
+    const waitResult = (await waitPromise) as { isError?: boolean };
+    const sendResult = (await sendPromise) as {
+      isError?: boolean;
+      content: Array<{ type: string; text?: string }>;
+    };
+
+    // The unanswered command surfaced as a timeout error (not a hang, not a
+    // cross-read of the queued command's result)
+    expect(waitResult.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining('RuntimeHelper did not respond'),
+      expect.any(Array),
+    );
+
+    // The queued command still ran to completion after the failure
+    expect(sendResult.isError).not.toBe(true);
+    const sendParsed = JSON.parse(sendResult.content[0].text!);
+    expect(sendParsed).toMatchObject({ success: true, action: 'jump' });
+  });
+});

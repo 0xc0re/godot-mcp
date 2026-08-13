@@ -63,10 +63,32 @@ const HELPER_TIMEOUT_SUGGESTIONS = [
 ];
 
 /**
+ * Serializes use of the single trigger/result file pair.
+ *
+ * The IPC channel has no request correlation: one trigger file, one result
+ * file. Two in-flight commands would interleave destructively — the second
+ * trigger write overwrites the first before the helper's poll, and both
+ * callers then poll the same result file, so caller A can read caller B's
+ * result AS ITS OWN (a wrong-command body with no "error" key parses as
+ * success). The MCP SDK dispatches requests concurrently, and wait_for makes
+ * overlap the natural pattern (send_input while a wait_for loop is polling).
+ *
+ * A module-level promise chain (same pattern as the helper-injection restore
+ * serialization) queues callers FIFO. The channel is only held per command
+ * round-trip (~0.5s typical, 5s worst case) — wait_for sleeps BETWEEN polls
+ * outside the channel — so a queued send_input interleaves between wait_for
+ * polls rather than waiting out the whole wait. Failures (including
+ * timeouts) never wedge the chain.
+ */
+let ipcChain: Promise<void> = Promise.resolve();
+
+/**
  * Send a command to the runtime_helper.gd autoload and wait for its result.
  *
  * Shared IPC channel for the inspect_* tools AND capture_screenshot (the
  * screenshot helper was merged into runtime_helper.gd as one more command).
+ * Calls are serialized through ipcChain — see above — so at most one command
+ * is on the trigger/result files at a time.
  *
  * Deletes any stale output file FIRST, then writes the trigger file. This
  * ordering matters: deleting after the trigger is written races the helper's
@@ -77,6 +99,22 @@ const HELPER_TIMEOUT_SUGGESTIONS = [
  * and parses the JSON, then cleans up both files.
  */
 export async function triggerAndPoll(
+  projectPath: string,
+  command: string,
+  params: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const run = ipcChain.then(() => performTriggerAndPoll(projectPath, command, params));
+  // Keep the chain alive whether this request resolves or rejects; the
+  // caller still sees the rejection through `run`.
+  ipcChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/** The actual trigger-write / result-poll cycle. Only ever runs serialized. */
+async function performTriggerAndPoll(
   projectPath: string,
   command: string,
   params: Record<string, unknown>,
