@@ -10,8 +10,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ChildProcess } from 'child_process';
-import type { ServerContext } from '../src/types.js';
+import type { GodotProcess, ServerContext } from '../src/types.js';
 import { registerEditorTools } from '../src/tools/editor.js';
+import { appendProcessOutput } from '../src/tools/common.js';
 
 // Mock fs module
 vi.mock('fs', async () => {
@@ -497,6 +498,32 @@ describe('Editor MCP Tools', () => {
       expect(parsed.errors).toEqual(['ERROR: bad thing']);
     });
 
+    it('default call is byte-for-byte identical to the legacy shape (no cursor fields)', async () => {
+      const procRecord: GodotProcess = {
+        process: createMockProcess(),
+        output: [],
+        errors: [],
+        combined: [],
+        totalLines: 0,
+      };
+      appendProcessOutput(procRecord, 'stdout', ['line one', 'line two']);
+      appendProcessOutput(procRecord, 'stderr', ['ERROR: bad thing']);
+      ctx.activeProcess = procRecord;
+
+      const handler = handlers.get('get_debug_output')!;
+      const result = await handler({}) as { content: Array<{ text: string }> };
+
+      // Exact legacy response body: only output/errors, same key order,
+      // same 2-space pretty-printing.
+      expect(result.content[0].text).toBe(
+        JSON.stringify(
+          { output: ['line one', 'line two'], errors: ['ERROR: bad thing'] },
+          null,
+          2,
+        ),
+      );
+    });
+
     it('returns toolError when no process is active', async () => {
       ctx.activeProcess = null;
 
@@ -508,6 +535,230 @@ describe('Editor MCP Tools', () => {
         expect.stringContaining('No active Godot process'),
         expect.any(Array),
       );
+    });
+
+    describe('since_line cursor', () => {
+      function recordWithLines(): GodotProcess {
+        const procRecord: GodotProcess = {
+          process: createMockProcess(),
+          output: [],
+          errors: [],
+          combined: [],
+          totalLines: 0,
+        };
+        appendProcessOutput(procRecord, 'stdout', ['out-0', 'out-1']);
+        appendProcessOutput(procRecord, 'stderr', ['err-2']);
+        appendProcessOutput(procRecord, 'stdout', ['out-3', 'out-4']);
+        return procRecord;
+      }
+
+      it('returns only lines at or after the cursor, split by stream', async () => {
+        ctx.activeProcess = recordWithLines();
+
+        const handler = handlers.get('get_debug_output')!;
+        const result = await handler({ since_line: 2 }) as {
+          content: Array<{ text: string }>;
+        };
+
+        const parsed = JSON.parse(result.content[0].text);
+        expect(parsed.output).toEqual(['out-3', 'out-4']);
+        expect(parsed.errors).toEqual(['err-2']);
+        expect(parsed.next_line).toBe(5);
+        expect(parsed.total_lines).toBe(5);
+        expect(parsed.truncated).toBe(false);
+      });
+
+      it('advances the cursor: passing next_line back returns only the delta', async () => {
+        const procRecord = recordWithLines();
+        ctx.activeProcess = procRecord;
+        const handler = handlers.get('get_debug_output')!;
+
+        const first = await handler({ since_line: 0 }) as { content: Array<{ text: string }> };
+        const firstParsed = JSON.parse(first.content[0].text);
+        expect(firstParsed.next_line).toBe(5);
+
+        appendProcessOutput(procRecord, 'stderr', ['err-5']);
+        appendProcessOutput(procRecord, 'stdout', ['out-6']);
+
+        const second = await handler({ since_line: firstParsed.next_line }) as {
+          content: Array<{ text: string }>;
+        };
+        const parsed = JSON.parse(second.content[0].text);
+        expect(parsed.output).toEqual(['out-6']);
+        expect(parsed.errors).toEqual(['err-5']);
+        expect(parsed.next_line).toBe(7);
+        expect(parsed.truncated).toBe(false);
+      });
+
+      it('returns an empty delta when no new lines arrived', async () => {
+        ctx.activeProcess = recordWithLines();
+        const handler = handlers.get('get_debug_output')!;
+
+        const result = await handler({ since_line: 5 }) as { content: Array<{ text: string }> };
+        const parsed = JSON.parse(result.content[0].text);
+        expect(parsed.output).toEqual([]);
+        expect(parsed.errors).toEqual([]);
+        expect(parsed.next_line).toBe(5);
+      });
+
+      it('flags truncated: true when the cursor was evicted by the bounded window', async () => {
+        // Simulate a chatty game: 1500 lines captured, only the last 3 retained.
+        const procRecord: GodotProcess = {
+          process: createMockProcess(),
+          output: ['kept-1497', 'kept-1498', 'kept-1499'],
+          errors: [],
+          combined: [
+            { stream: 'stdout', text: 'kept-1497' },
+            { stream: 'stdout', text: 'kept-1498' },
+            { stream: 'stdout', text: 'kept-1499' },
+          ],
+          totalLines: 1500,
+        };
+        ctx.activeProcess = procRecord;
+
+        const handler = handlers.get('get_debug_output')!;
+        const result = await handler({ since_line: 100 }) as { content: Array<{ text: string }> };
+        const parsed = JSON.parse(result.content[0].text);
+
+        expect(parsed.truncated).toBe(true);
+        // Returns from the window start (the oldest lines still retained).
+        expect(parsed.output).toEqual(['kept-1497', 'kept-1498', 'kept-1499']);
+        expect(parsed.next_line).toBe(1500);
+        expect(parsed.total_lines).toBe(1500);
+      });
+
+      it('does not flag truncated when the cursor is inside the window', async () => {
+        const procRecord: GodotProcess = {
+          process: createMockProcess(),
+          output: ['kept-1497', 'kept-1498', 'kept-1499'],
+          errors: [],
+          combined: [
+            { stream: 'stdout', text: 'kept-1497' },
+            { stream: 'stdout', text: 'kept-1498' },
+            { stream: 'stdout', text: 'kept-1499' },
+          ],
+          totalLines: 1500,
+        };
+        ctx.activeProcess = procRecord;
+
+        const handler = handlers.get('get_debug_output')!;
+        const result = await handler({ since_line: 1498 }) as { content: Array<{ text: string }> };
+        const parsed = JSON.parse(result.content[0].text);
+
+        expect(parsed.truncated).toBe(false);
+        expect(parsed.output).toEqual(['kept-1498', 'kept-1499']);
+      });
+
+      it('falls back to an output-then-errors view for records without combined state', async () => {
+        ctx.activeProcess = {
+          process: createMockProcess(),
+          output: ['legacy out'],
+          errors: ['legacy err'],
+        };
+
+        const handler = handlers.get('get_debug_output')!;
+        const result = await handler({ since_line: 0 }) as { content: Array<{ text: string }> };
+        const parsed = JSON.parse(result.content[0].text);
+
+        expect(parsed.output).toEqual(['legacy out']);
+        expect(parsed.errors).toEqual(['legacy err']);
+        expect(parsed.next_line).toBe(2);
+        expect(parsed.truncated).toBe(false);
+      });
+    });
+
+    describe('format: structured', () => {
+      it('parses captured lines into grouped entries with script/line/stack', async () => {
+        const procRecord: GodotProcess = {
+          process: createMockProcess(),
+          output: [],
+          errors: [],
+          combined: [],
+          totalLines: 0,
+        };
+        appendProcessOutput(procRecord, 'stdout', ['Hello from plain print']);
+        appendProcessOutput(procRecord, 'stderr', [
+          'ERROR: Something failed: this is a push_error',
+          '   at: push_error (core/variant/variant_utility.cpp:1023)',
+          '   GDScript backtrace (most recent call first):',
+          '       [0] _ready (res://main.gd:8)',
+          'SCRIPT ERROR: Invalid call. Boom.',
+          '          at: _crash (res://main.gd:15)',
+          '          GDScript backtrace (most recent call first):',
+          '              [0] _crash (res://main.gd:15)',
+          '              [1] _ready (res://main.gd:11)',
+        ]);
+        ctx.activeProcess = procRecord;
+
+        const handler = handlers.get('get_debug_output')!;
+        const result = await handler({ format: 'structured' }) as {
+          content: Array<{ text: string }>;
+        };
+        const parsed = JSON.parse(result.content[0].text);
+
+        expect(parsed.entries).toEqual([
+          { kind: 'print', message: 'Hello from plain print' },
+          {
+            kind: 'push_error',
+            message: 'Something failed: this is a push_error',
+            script: 'res://main.gd',
+            line: 8,
+            stack: [
+              'at: push_error (core/variant/variant_utility.cpp:1023)',
+              '[0] _ready (res://main.gd:8)',
+            ],
+          },
+          {
+            kind: 'script_error',
+            message: 'Invalid call. Boom.',
+            script: 'res://main.gd',
+            line: 15,
+            stack: [
+              'at: _crash (res://main.gd:15)',
+              '[0] _crash (res://main.gd:15)',
+              '[1] _ready (res://main.gd:11)',
+            ],
+          },
+        ]);
+        expect(parsed.next_line).toBe(10);
+        expect(parsed.total_lines).toBe(10);
+        expect(parsed.truncated).toBe(false);
+        expect(parsed.output).toBeUndefined();
+        expect(parsed.errors).toBeUndefined();
+      });
+
+      it('combines with since_line to parse only the delta', async () => {
+        const procRecord: GodotProcess = {
+          process: createMockProcess(),
+          output: [],
+          errors: [],
+          combined: [],
+          totalLines: 0,
+        };
+        appendProcessOutput(procRecord, 'stdout', ['old print']);
+        const cursor = procRecord.totalLines!;
+        appendProcessOutput(procRecord, 'stderr', [
+          'ERROR: fresh push_error',
+          '   at: push_error (core/variant/variant_utility.cpp:1023)',
+        ]);
+        ctx.activeProcess = procRecord;
+
+        const handler = handlers.get('get_debug_output')!;
+        const result = await handler({ since_line: cursor, format: 'structured' }) as {
+          content: Array<{ text: string }>;
+        };
+        const parsed = JSON.parse(result.content[0].text);
+
+        expect(parsed.entries).toEqual([
+          {
+            kind: 'push_error',
+            message: 'fresh push_error',
+            stack: ['at: push_error (core/variant/variant_utility.cpp:1023)'],
+          },
+        ]);
+        expect(parsed.next_line).toBe(3);
+        expect(parsed.truncated).toBe(false);
+      });
     });
   });
 

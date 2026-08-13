@@ -7,10 +7,11 @@ import { z } from 'zod';
 import { join, dirname } from 'path';
 import { existsSync, readFileSync, unlinkSync, statSync } from 'fs';
 import { spawn } from 'child_process';
-import type { ServerContext } from '../types.js';
+import type { CapturedLine, GodotProcess, ServerContext } from '../types.js';
 import { validatePath, trackProcess, parseOperationOutput } from '../godot.js';
 import { toolError } from '../errors.js';
-import { withProject, textResult, appendCapped } from './common.js';
+import { withProject, textResult, appendProcessOutput } from './common.js';
+import { parseGodotLog } from '../parsers/godot-log-parser.js';
 import { injectRuntimeHelper, restoreHelperInjection } from '../helper-autoloads.js';
 import { triggerAndPoll } from './runtime.js';
 import { logger } from '../logger.js';
@@ -109,14 +110,21 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
           ctx,
           spawn(ctx.godotPath, cmdArgs, { stdio: 'pipe' }),
         );
-        const output: string[] = [];
-        const errors: string[] = [];
+        const procRecord: GodotProcess = {
+          process: proc,
+          output: [],
+          errors: [],
+          combined: [],
+          totalLines: 0,
+        };
 
         // Output/error buffers are bounded windows (see MAX_PROCESS_OUTPUT_LINES
         // in common.ts): the oldest lines are dropped once the cap is reached.
+        // appendProcessOutput also maintains the chronological combined view
+        // and the monotonic line counter behind get_debug_output's cursor.
         proc.stdout?.on('data', (data: Buffer) => {
           const lines = data.toString().split('\n');
-          appendCapped(output, lines);
+          appendProcessOutput(procRecord, 'stdout', lines);
           lines.forEach((line: string) => {
             if (line.trim()) logger.debug(`[Godot stdout] ${line}`);
           });
@@ -124,7 +132,7 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
 
         proc.stderr?.on('data', (data: Buffer) => {
           const lines = data.toString().split('\n');
-          appendCapped(errors, lines);
+          appendProcessOutput(procRecord, 'stderr', lines);
           lines.forEach((line: string) => {
             if (line.trim()) logger.debug(`[Godot stderr] ${line}`);
           });
@@ -148,7 +156,7 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
           void restoreHelperInjection(ctx, injection);
         });
 
-        ctx.activeProcess = { process: proc, output, errors };
+        ctx.activeProcess = procRecord;
 
         let message = 'Godot project started in debug mode. Use get_debug_output to see output.';
         if (helpers === null) {
@@ -170,9 +178,35 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
     'get_debug_output',
     {
       title: 'Get Debug Output',
-      description: 'Get the current debug output and errors',
+      description:
+        'Get the current debug output and errors. Optionally pass since_line (the next_line ' +
+        'cursor from a previous call) to fetch only new lines, and format: "structured" to get ' +
+        'parsed entries (script errors, push_error/push_warning blocks with script/line/stack) ' +
+        'instead of raw text. Output is a bounded window of the most recent 1000 lines; if a ' +
+        'since_line cursor points at lines already evicted from the window, the response sets ' +
+        'truncated: true and returns from the window start.',
+      inputSchema: {
+        since_line: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe(
+            'Return only lines at or after this cursor (pass the next_line value from a ' +
+              'previous call). Line numbers count all lines ever captured, including lines ' +
+              'already evicted from the bounded window.',
+          ),
+        format: z
+          .enum(['text', 'structured'])
+          .optional()
+          .describe(
+            'Response format: "text" (default) returns raw output/errors line arrays; ' +
+              '"structured" returns parsed entries grouped into script_error / push_error / ' +
+              'push_warning / print / engine with script, line, and stack where available.',
+          ),
+      },
     },
-    async () => {
+    async ({ since_line, format }) => {
       if (!ctx.activeProcess) {
         return toolError('No active Godot process.', [
           'Use run_project to start a Godot project first',
@@ -180,20 +214,50 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
         ]);
       }
 
+      // Legacy shape, byte-for-byte: no cursor, no structured parsing.
+      if (since_line === undefined && format !== 'structured') {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(
+                {
+                  output: ctx.activeProcess.output,
+                  errors: ctx.activeProcess.errors,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      }
+
+      const { window, total, windowStart } = combinedView(ctx.activeProcess);
+
+      // The cursor points at lines the bounded window has already evicted:
+      // say so explicitly instead of silently returning from the window start.
+      const truncated = since_line !== undefined && since_line < windowStart;
+      const start = Math.max(since_line ?? windowStart, windowStart);
+      const slice = window.slice(start - windowStart);
+
+      const cursor = {
+        next_line: total,
+        total_lines: total,
+        truncated,
+      };
+
+      const body =
+        format === 'structured'
+          ? { entries: parseGodotLog(slice.map((l) => l.text)), ...cursor }
+          : {
+              output: slice.filter((l) => l.stream === 'stdout').map((l) => l.text),
+              errors: slice.filter((l) => l.stream === 'stderr').map((l) => l.text),
+              ...cursor,
+            };
+
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              {
-                output: ctx.activeProcess.output,
-                errors: ctx.activeProcess.errors,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
+        content: [{ type: 'text' as const, text: JSON.stringify(body, null, 2) }],
       };
     },
   );
@@ -341,6 +405,34 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
       }
     },
   );
+}
+
+/**
+ * Chronological line view of a process record for get_debug_output's cursor.
+ *
+ * `window` is the bounded combined stdout+stderr interleave, `total` the
+ * monotonic count of all lines ever captured (= the next_line cursor), and
+ * `windowStart` the absolute line number of the first line still retained
+ * (total - window.length). A since_line older than windowStart has been
+ * evicted by the MAX_PROCESS_OUTPUT_LINES cap.
+ *
+ * Records built before appendProcessOutput existed (or hand-built in tests)
+ * may lack combined/totalLines; those fall back to a synthesized
+ * output-then-errors view with no eviction history.
+ */
+function combinedView(procRecord: GodotProcess): {
+  window: CapturedLine[];
+  total: number;
+  windowStart: number;
+} {
+  const window =
+    procRecord.combined ??
+    [
+      ...procRecord.output.map((text): CapturedLine => ({ stream: 'stdout', text })),
+      ...procRecord.errors.map((text): CapturedLine => ({ stream: 'stderr', text })),
+    ];
+  const total = procRecord.totalLines ?? window.length;
+  return { window, total, windowStart: total - window.length };
 }
 
 /** Target dimensions for screenshot resize (keeps images under Claude Desktop's 1MB limit). */

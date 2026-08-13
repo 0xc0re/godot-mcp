@@ -11,6 +11,7 @@ import { existsSync } from 'fs';
 import { join } from 'path';
 import { validatePath } from '../godot.js';
 import { toolError, type ToolResult } from '../errors.js';
+import type { CapturedLine, GodotProcess } from '../types.js';
 
 /**
  * Standard catch-block suggestions for tools that shell out to Godot.
@@ -124,15 +125,37 @@ export const MAX_PROCESS_OUTPUT_LINES = 1000;
  * Append lines to a process output buffer, enforcing the bounded window.
  * Mutates `buffer` in place (the buffer is shared via ctx.activeProcess).
  */
-export function appendCapped(
-  buffer: string[],
-  lines: string[],
+export function appendCapped<T>(
+  buffer: T[],
+  lines: T[],
   cap: number = MAX_PROCESS_OUTPUT_LINES,
 ): void {
   buffer.push(...lines);
   if (buffer.length > cap) {
     buffer.splice(0, buffer.length - cap);
   }
+}
+
+/**
+ * Append captured lines from one stream to a process record: the per-stream
+ * buffer (output/errors), the chronological combined interleave, and the
+ * monotonic total-line counter that survives window eviction (the counter
+ * is what lets get_debug_output's since_line cursor detect that lines it
+ * asks for have already been dropped by the cap).
+ */
+export function appendProcessOutput(
+  procRecord: GodotProcess,
+  stream: 'stdout' | 'stderr',
+  lines: string[],
+): void {
+  appendCapped(stream === 'stdout' ? procRecord.output : procRecord.errors, lines);
+  procRecord.combined ??= [];
+  procRecord.totalLines ??= 0;
+  appendCapped(
+    procRecord.combined,
+    lines.map((text): CapturedLine => ({ stream, text })),
+  );
+  procRecord.totalLines += lines.length;
 }
 
 /**

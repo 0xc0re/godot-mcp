@@ -17,10 +17,10 @@ import { z } from 'zod';
 import { join } from 'path';
 import { existsSync, writeFileSync, readFileSync, unlinkSync } from 'fs';
 import { spawn } from 'child_process';
-import type { ServerContext } from '../types.js';
+import type { GodotProcess, ServerContext } from '../types.js';
 import { validatePath, trackProcess } from '../godot.js';
 import { toolError } from '../errors.js';
-import { withProject, textResult, appendCapped } from './common.js';
+import { withProject, textResult, appendProcessOutput } from './common.js';
 import { injectRuntimeHelper, restoreHelperInjection } from '../helper-autoloads.js';
 
 /** Relative path within project to the trigger file */
@@ -426,19 +426,25 @@ export function registerRuntimeTools(server: McpServer, ctx: ServerContext): voi
           ctx,
           spawn(ctx.godotPath, args, { stdio: 'pipe' }),
         );
-        const output: string[] = [];
-        const errors: string[] = [];
+        const procRecord: GodotProcess = {
+          process: proc,
+          output: [],
+          errors: [],
+          combined: [],
+          totalLines: 0,
+        };
 
         // Bounded windows (see MAX_PROCESS_OUTPUT_LINES in common.ts):
-        // oldest lines are dropped once the cap is reached.
+        // oldest lines are dropped once the cap is reached. appendProcessOutput
+        // also maintains the combined view + line counter for get_debug_output.
         proc.stdout?.on('data', (data: Buffer) => {
           const lines = data.toString().split('\n');
-          appendCapped(output, lines);
+          appendProcessOutput(procRecord, 'stdout', lines);
         });
 
         proc.stderr?.on('data', (data: Buffer) => {
           const lines = data.toString().split('\n');
-          appendCapped(errors, lines);
+          appendProcessOutput(procRecord, 'stderr', lines);
         });
 
         // Mirror run_project: clear activeProcess when the process dies so
@@ -459,7 +465,7 @@ export function registerRuntimeTools(server: McpServer, ctx: ServerContext): voi
           void restoreHelperInjection(ctx, injection);
         });
 
-        ctx.activeProcess = { process: proc, output, errors };
+        ctx.activeProcess = procRecord;
 
         // Wait for first stdout data with 5s timeout (confirms engine is running)
         await new Promise<void>((resolve) => {
