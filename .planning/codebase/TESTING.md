@@ -1,6 +1,6 @@
 # Testing Patterns
 
-**Analysis Date:** 2026-03-03
+**Analysis Date:** 2026-08-13 (refreshed during v2.1-hardening Track D)
 
 ## Test Framework
 
@@ -13,12 +13,15 @@
 
 **Run Commands:**
 ```bash
-npx vitest run                  # Run all tests (one-shot)
-npx vitest                      # Watch mode
+npm test                        # Run all tests (one-shot; vitest run)
+npm run test:watch              # Watch mode
+npm run typecheck               # tsc --noEmit (covers src/ AND tests/)
 npx vitest run --reporter=verbose  # Verbose output with test names
 ```
 
-**Stats:** 16 test files, 143 tests — all passing
+CI (.github/workflows/ci.yml) runs typecheck → build → test on Node 20 and 22.
+
+**Stats:** 33 test files, 736 tests — all passing (derived 2026-08-13 from `npm test`)
 
 ## Test File Organization
 
@@ -30,29 +33,43 @@ npx vitest run --reporter=verbose  # Verbose output with test names
 - `tests/{module-name}.test.ts` for unit/parser tests
 - `tests/fixtures/` for static test data files
 
-**Structure:**
+**Structure (33 files):**
 ```
 tests/
-├── diagnostics-tools.test.ts    # get_diagnostics tool
+├── animation-tools.test.ts      # create_animation, add_keyframes, libraries
+├── composition-tools.test.ts    # signals, instancing, groups, batch properties
+├── config-tools.test.ts         # input actions, collision layers, autoloads
+├── diagnostics-tools.test.ts    # get_diagnostics, validate_scene
+├── editor-tools.test.ts         # launch_editor, run/stop_project, get_debug_output
 ├── error-responses.test.ts      # toolError() contract + source conformance
+├── export-tools.test.ts         # export_project, presets, readiness check
+├── helper-autoloads.test.ts     # runtime helper autoload auto-registration
+├── integration.test.ts          # NO mocks: real validatePath + .tscn round-trip
 ├── lsp-client.test.ts           # LspClient TCP lifecycle
 ├── lsp-protocol.test.ts         # LSP framing encode/parse
+├── output-caps.test.ts          # bounded process output windows (appendCapped)
+├── path-safety.test.ts          # resolveWithinProject / ensureProject hardening
 ├── process-hardening.test.ts    # execGodot/executeOperation safety
 ├── project-parser.test.ts       # project.godot INI parser
-├── project-tools.test.ts        # read_project_settings, modify_project_setting
+├── project-tools.test.ts        # project settings + info tools
 ├── resource-registration.test.ts # MCP resource templates (scene/script)
-├── resource-tools.test.ts       # read_resource, create_resource
+├── resource-tools.test.ts       # read/create/modify_resource
+├── run-operation.test.ts        # parseOperationOutput three-tier verdicts
+├── runtime-tools.test.ts        # inspect_* file-polling IPC, restart_project
+├── scaffold-tools.test.ts       # scaffold generators + overwrite flag
 ├── scene-tools.test.ts          # Scene CRUD tools
-├── screenshot-tools.test.ts     # capture_screenshot
+├── screenshot-tools.test.ts     # capture_screenshot + resize
 ├── script-tools.test.ts         # validate_scripts, list_scripts, query_class
-├── sdk-version.test.ts          # package.json version assertions
+├── sdk-version.test.ts          # SDK constraint + version single-sourcing
+├── shader-tools.test.ts         # shader file/material/params tools
 ├── signal-handlers.test.ts      # SIGINT/SIGTERM source conformance
-├── tool-registration.test.ts    # McpServer instantiation smoke test
+├── testing-tools.test.ts        # run_tests (GUT runner)
+├── tilemap-tools.test.ts        # create_tileset, paint_tilemap
+├── tool-registration.test.ts    # registry smoke test: authoritative 65-tool roster
 ├── tscn-parser.test.ts          # .tscn/.tres file parser
-└── fixtures/
-    ├── sample.project.godot
-    ├── sample.tres
-    └── sample.tscn
+├── tscn-writer.test.ts          # .tscn writer + escaping/injection guards
+├── uid-tools.test.ts            # get_uid, update_project_uids
+└── fixtures/                    # sample.project.godot, sample.tres, sample.tscn
 ```
 
 ## Test Structure
@@ -106,9 +123,12 @@ vi.mock('fs', async () => {
   };
 });
 
-// Mock godot module (isolate from real Godot process)
+// Mock godot module (isolate from real Godot process). Factories are CLOSED:
+// self-contained, no references to outer variables.
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
+  resolveWithinProject: vi.fn(),
+  runOperation: vi.fn(),
   executeOperation: vi.fn(),
 }));
 
@@ -140,10 +160,30 @@ function getToolHandlers(
 }
 ```
 
+**runOperation stubs:** tool handlers judge outcomes through `runOperation()`'s
+`OperationResult`. Stub `{ ok: true, data: {...} }` / `{ ok: false, error: '...' }`
+(plus `stdout`/`stderr`/`exitCode` when the handler inspects them) — NOT raw
+stdout strings:
+
+```typescript
+vi.mocked(runOperation).mockResolvedValue({
+  ok: true,
+  data: { success: true },
+  stdout: '{"success":true}',
+  stderr: '',
+  exitCode: 0,
+});
+```
+
+**Path-rejection helper:** tool test files define a per-file `expectPathRejected(tool, args, paramName)`
+helper that invokes the handler with a traversal-style path (`'../../evil.tres'`) and asserts the
+`Invalid <param>: path resolves outside the project directory` (or `Invalid path`) error. Every tool
+accepting a project-relative path gets such a case.
+
 **What to Mock:**
 - `fs` functions (`existsSync`, `readFileSync`, `writeFileSync`, `statSync`, `unlinkSync`)
 - `child_process` (`execFile`, `spawn`)
-- `../src/godot.js` (`validatePath`, `executeOperation`, `execGodot`, `trackProcess`)
+- `../src/godot.js` (`validatePath`, `resolveWithinProject`, `runOperation`, `executeOperation`, `execGodot`, `trackProcess`)
 - `../src/errors.js` (`toolError`) — always mocked with the same standard implementation
 - `../src/parsers/tscn-parser.js` / `../src/parsers/project-parser.js` — when testing tool layer only
 - LSP client (`../src/lsp/client.js`) — mock for diagnostics tool tests
@@ -226,8 +266,15 @@ npx vitest run --coverage
 - `signal-handlers.test.ts`: Reads `src/index.ts` and asserts SIGINT/SIGTERM handler presence via regex
 - `sdk-version.test.ts`: Parses `package.json` and asserts SDK version constraints
 
+**Integration Tests (No Mocks):**
+- `integration.test.ts`: real `validatePath` behavior + a real `.tscn` round-trip
+  (fixture → tscn-parser → tscn-writer → tscn-parser), no godot.js/fs mocks
+
 **E2E Tests:**
-- Not present — no tests invoke real Godot processes
+- Not automated — no tests invoke real Godot processes. Live smokes are manual:
+  run an operation from `build/scripts/godot_operations.gd` against a scratch
+  project and check the trailing JSON + exit code (pattern documented in
+  CONTRIBUTING.md)
 
 ## Common Patterns
 
@@ -321,4 +368,4 @@ expect(sceneCall![1]).toBeInstanceOf(ResourceTemplate);
 
 ---
 
-*Testing analysis: 2026-03-03*
+*Testing analysis: 2026-08-13 (v2.1-hardening Track D refresh; counts from `npm test`: 33 files / 736 tests)*
