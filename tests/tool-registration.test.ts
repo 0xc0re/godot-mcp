@@ -1,6 +1,6 @@
 /**
  * Registry smoke test: registers all 16 tool modules against a real McpServer
- * and asserts the complete expected tool roster (65 tools) is present, with
+ * and asserts the complete expected tool roster (68 tools) is present, with
  * no duplicates and no strays.
  *
  * No mocks — registration only wires up handlers; nothing touches the
@@ -30,7 +30,7 @@ import { registerScaffoldTools } from '../src/tools/scaffold.js';
 
 /**
  * The authoritative tool roster, grouped by module. Derived from the
- * server.registerTool calls in each src/tools/*.ts file (65 total).
+ * server.registerTool calls in each src/tools/*.ts file (68 total).
  * A tool added or removed in src/ without updating this list fails the test.
  */
 const EXPECTED_TOOLS: Record<string, string[]> = {
@@ -90,7 +90,15 @@ const EXPECTED_TOOLS: Record<string, string[]> = {
     'assign_animation_library',
   ],
   tilemap: ['create_tileset', 'paint_tilemap'],
-  runtime: ['inspect_scene_tree', 'inspect_node', 'restart_project', 'batch_set_properties'],
+  runtime: [
+    'inspect_scene_tree',
+    'inspect_node',
+    'restart_project',
+    'batch_set_properties',
+    'send_input',
+    'invoke_runtime',
+    'wait_for',
+  ],
   testing: ['run_tests'],
   scaffold: [
     'scaffold_event_bus',
@@ -156,7 +164,7 @@ describe('Tool registry smoke test', () => {
     expect(() => registerAllTools()).not.toThrow();
   });
 
-  it('registers exactly the expected 65 tools', () => {
+  it('registers exactly the expected 68 tools', () => {
     const { registered } = registerAllTools();
 
     // Exact set equality, reported symmetrically so a failure names the tool
@@ -164,7 +172,7 @@ describe('Tool registry smoke test', () => {
     const unexpected = registered.filter((name) => !ALL_EXPECTED.includes(name));
     expect(missing).toEqual([]);
     expect(unexpected).toEqual([]);
-    expect(registered).toHaveLength(65);
+    expect(registered).toHaveLength(68);
   });
 
   it('registers no duplicate tool names', () => {

@@ -1,8 +1,15 @@
 /**
- * Runtime inspection tool domain: inspect_scene_tree, inspect_node, inspect_group
+ * Runtime interaction tool domain: inspect_scene_tree, inspect_node,
+ * inspect_group, restart_project, send_input, invoke_runtime, wait_for.
  *
- * Uses file-polling IPC with runtime_helper.gd autoload to inspect a running
- * Godot game's live scene tree, node properties, and group membership.
+ * Uses file-polling IPC with runtime_helper.gd autoload to inspect and drive
+ * a running Godot game: live scene tree, node properties, group membership,
+ * injected input events, structured method calls / property writes, and
+ * condition polling.
+ *
+ * SECURITY: every runtime command takes structured params only (method
+ * identifiers, typed args arrays, property paths, condition specs). There is
+ * deliberately NO expression-string or script-source surface anywhere here.
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -27,6 +34,33 @@ const POLL_TIMEOUT_MS = 5000;
 
 /** Polling interval in ms to check for result file */
 const POLL_INTERVAL_MS = 100;
+
+/** Default overall timeout in ms for a wait_for condition */
+const WAIT_FOR_DEFAULT_TIMEOUT_MS = 10000;
+
+/** Default interval in ms between wait_for condition polls */
+const WAIT_FOR_POLL_INTERVAL_MS = 200;
+
+/**
+ * A plain GDScript identifier: the ONLY accepted shape for method names.
+ * Anything with parens, dots, spaces, or operators (i.e. anything that could
+ * be an expression) is rejected — structured params only, never code.
+ */
+const GDSCRIPT_IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * A property path: identifier optionally followed by :subname segments
+ * (Godot's set_indexed syntax, e.g. "position:x"). Same anti-expression
+ * rationale as GDSCRIPT_IDENTIFIER_RE.
+ */
+const PROPERTY_PATH_RE = /^[A-Za-z_][A-Za-z0-9_]*(:[A-Za-z_][A-Za-z0-9_]*)*$/;
+
+/** Standard suggestions when the RuntimeHelper IPC channel times out. */
+const HELPER_TIMEOUT_SUGGESTIONS = [
+  'Ensure the RuntimeHelper autoload is injected (run_project with inject_helpers, default true)',
+  'Verify the game is running and processing frames',
+  'Check that the .godot/ directory exists in the project',
+];
 
 /**
  * Send a command to the runtime_helper.gd autoload and wait for its result.
@@ -409,6 +443,387 @@ export function registerRuntimeTools(server: McpServer, ctx: ServerContext): voi
             running: !proc.killed,
           }),
         );
+      },
+    ),
+  );
+
+  // Tool 5: send_input
+  server.registerTool(
+    'send_input',
+    {
+      title: 'Send Input',
+      description:
+        'Inject a parameterized input event into the running Godot project: an InputMap ' +
+        'action press/release, a key event, or a mouse button event. Structured params ' +
+        'only — event type plus typed fields; no free-form event data. ' +
+        'Headless note: events flow through the Input singleton (action states update, ' +
+        '_input callbacks fire) even under --headless, but behavior that needs a real ' +
+        'window (focus, mouse capture, on-screen position hit-testing) is inert. ' +
+        'The RuntimeHelper autoload is injected automatically by run_project (inject_helpers, default true).',
+      inputSchema: {
+        project_path: z.string().describe('Path to the Godot project directory'),
+        input: z
+          .object({
+            event_type: z
+              .enum(['action', 'key', 'mouse_button'])
+              .describe('Which event to construct: InputEventAction, InputEventKey, or InputEventMouseButton'),
+            action: z
+              .string()
+              .optional()
+              .describe('InputMap action name (required for event_type "action")'),
+            keycode: z
+              .string()
+              .optional()
+              .describe('Key name, e.g. "Space", "A", "Escape" (required for event_type "key")'),
+            button_index: z
+              .number()
+              .int()
+              .min(1)
+              .max(9)
+              .optional()
+              .describe('Mouse button index, 1 = left (event_type "mouse_button"; default 1)'),
+            pressed: z
+              .boolean()
+              .optional()
+              .describe('Pressed (true, default) or released (false)'),
+            strength: z
+              .number()
+              .min(0)
+              .max(1)
+              .optional()
+              .describe('Action strength 0..1 for analog-style actions (event_type "action")'),
+            position: z
+              .object({ x: z.number(), y: z.number() })
+              .optional()
+              .describe('Viewport position for mouse events'),
+          })
+          .describe('Structured input event spec'),
+      },
+    },
+    withProject(
+      { catchPrefix: 'Failed to send input' },
+      async ({ project_path, input }) => {
+        if (!ctx.activeProcess) {
+          return toolError('No active Godot process. Cannot send input.', [
+            'Use run_project to start a Godot project first',
+            'Ensure the RuntimeHelper autoload is injected (inject_helpers, default true)',
+          ]);
+        }
+
+        if (input.event_type === 'action' && !input.action) {
+          return toolError("send_input: 'action' is required for event_type 'action'", [
+            'Provide the InputMap action name, e.g. { event_type: "action", action: "jump" }',
+          ]);
+        }
+        if (input.event_type === 'key' && !input.keycode) {
+          return toolError("send_input: 'keycode' is required for event_type 'key'", [
+            'Provide a key name, e.g. { event_type: "key", keycode: "Space" }',
+          ]);
+        }
+
+        try {
+          const result = await triggerAndPoll(project_path, 'send_input', input);
+          if (typeof result.error === 'string') {
+            return toolError(result.error, [
+              'Use list_input_actions to see the actions defined in the project',
+              'Check the event_type and its required fields',
+            ]);
+          }
+          return textResult(JSON.stringify(result, null, 2));
+        } catch (error: unknown) {
+          if (error instanceof Error && error.message === 'timeout') {
+            return toolError(
+              'send_input timed out. The RuntimeHelper did not respond within 5 seconds.',
+              HELPER_TIMEOUT_SUGGESTIONS,
+            );
+          }
+          throw error;
+        }
+      },
+    ),
+  );
+
+  // Tool 6: invoke_runtime
+  server.registerTool(
+    'invoke_runtime',
+    {
+      title: 'Invoke Runtime',
+      description:
+        'Call a method or set a property on a node in the running Godot project. ' +
+        'Structured params only: a plain-identifier method name plus a typed args array, ' +
+        'or a property path (e.g. "position" or "position:x") plus a typed value. ' +
+        'Expression strings and script source are rejected by design — this is not an eval surface. ' +
+        'Godot types are passed as {"type": "Vector2"|"Vector2i"|"Vector3"|"Vector3i"|"Color"|"NodePath", ' +
+        '"value": [...]}. set_property reads the property back and returns the value the engine accepted. ' +
+        'The RuntimeHelper autoload is injected automatically by run_project (inject_helpers, default true).',
+      inputSchema: {
+        project_path: z.string().describe('Path to the Godot project directory'),
+        node_path: z.string().describe('Path to the target node, e.g. /root/Main/Player'),
+        operation: z
+          .enum(['call_method', 'set_property'])
+          .describe('Whether to call a method or set a property'),
+        method: z
+          .string()
+          .optional()
+          .describe('Method name — plain identifier only (required for call_method)'),
+        args: z
+          .array(z.any())
+          .optional()
+          .describe('Typed args array for call_method (JSON values or {"type", "value"} specs)'),
+        property: z
+          .string()
+          .optional()
+          .describe(
+            'Property path — identifier or colon-separated subpath like "position:x" (required for set_property)',
+          ),
+        value: z
+          .any()
+          .optional()
+          .describe('Typed value for set_property (JSON value or {"type", "value"} spec)'),
+      },
+    },
+    withProject(
+      { catchPrefix: 'Failed to invoke runtime operation' },
+      async ({ project_path, node_path, operation, method, args, value, property }) => {
+        if (!ctx.activeProcess) {
+          return toolError('No active Godot process. Cannot invoke runtime operation.', [
+            'Use run_project to start a Godot project first',
+            'Ensure the RuntimeHelper autoload is injected (inject_helpers, default true)',
+          ]);
+        }
+
+        let params: Record<string, unknown>;
+        if (operation === 'call_method') {
+          if (!method || !GDSCRIPT_IDENTIFIER_RE.test(method)) {
+            return toolError(
+              'invoke_runtime: method must be a plain identifier (structured params only; ' +
+                'expression strings are not accepted)',
+              [
+                'Pass the method name alone, e.g. method: "take_damage"',
+                'Pass arguments via the typed args array, not inside the method string',
+              ],
+            );
+          }
+          params = { node_path, method, args: args ?? [] };
+        } else {
+          if (!property || !PROPERTY_PATH_RE.test(property)) {
+            return toolError(
+              'invoke_runtime: property must be an identifier or colon-separated subpath ' +
+                'like "position:x" (structured params only; expression strings are not accepted)',
+              ['Pass the property path alone, e.g. property: "position:x"'],
+            );
+          }
+          if (value === undefined) {
+            return toolError("invoke_runtime: 'value' is required for set_property", [
+              'Provide the value to assign (JSON value or {"type", "value"} spec)',
+            ]);
+          }
+          params = { node_path, property, value };
+        }
+
+        try {
+          const result = await triggerAndPoll(project_path, operation, params);
+          if (typeof result.error === 'string') {
+            return toolError(result.error, [
+              'Use inspect_scene_tree to verify the node path',
+              'Use inspect_node to see the node’s available properties',
+            ]);
+          }
+          return textResult(JSON.stringify(result, null, 2));
+        } catch (error: unknown) {
+          if (error instanceof Error && error.message === 'timeout') {
+            return toolError(
+              'invoke_runtime timed out. The RuntimeHelper did not respond within 5 seconds.',
+              HELPER_TIMEOUT_SUGGESTIONS,
+            );
+          }
+          throw error;
+        }
+      },
+    ),
+  );
+
+  // Tool 7: wait_for
+  server.registerTool(
+    'wait_for',
+    {
+      title: 'Wait For Condition',
+      description:
+        'Poll the running Godot project until a structured condition spec becomes true or a ' +
+        'timeout elapses — replaces guess-timing sleeps. Condition types: node_exists ' +
+        '(node_path), property (node_path + property + op eq/ne/gt/lt/ge/le + value, with ' +
+        'optional float tolerance), group_count (group + op + value), elapsed_frames (frames ' +
+        'since the wait started). Condition specs are structured data only — no expressions. ' +
+        'Returns the observed value and poll count on success; a timeout reports the last ' +
+        'observed value. ' +
+        'The RuntimeHelper autoload is injected automatically by run_project (inject_helpers, default true).',
+      inputSchema: {
+        project_path: z.string().describe('Path to the Godot project directory'),
+        condition: z
+          .object({
+            type: z
+              .enum(['node_exists', 'property', 'group_count', 'elapsed_frames'])
+              .describe('Condition type'),
+            node_path: z
+              .string()
+              .optional()
+              .describe('Node path (node_exists, property)'),
+            property: z
+              .string()
+              .optional()
+              .describe('Property path, identifier or "a:b" subpath (property)'),
+            op: z
+              .enum(['eq', 'ne', 'gt', 'lt', 'ge', 'le'])
+              .optional()
+              .describe('Comparison operator (property, group_count; default eq)'),
+            value: z
+              .any()
+              .optional()
+              .describe('Expected value (property, group_count; JSON value or {"type", "value"} spec)'),
+            tolerance: z
+              .number()
+              .min(0)
+              .optional()
+              .describe('Absolute tolerance for float eq/ne comparisons (property)'),
+            group: z.string().optional().describe('Group name (group_count)'),
+            frames: z
+              .number()
+              .int()
+              .positive()
+              .optional()
+              .describe('Number of engine frames to wait (elapsed_frames)'),
+          })
+          .describe('Structured condition spec'),
+        timeout_ms: z
+          .number()
+          .int()
+          .min(100)
+          .max(120000)
+          .optional()
+          .describe(`Overall timeout in ms (default ${WAIT_FOR_DEFAULT_TIMEOUT_MS})`),
+        poll_interval_ms: z
+          .number()
+          .int()
+          .min(50)
+          .max(5000)
+          .optional()
+          .describe(`Interval between condition polls in ms (default ${WAIT_FOR_POLL_INTERVAL_MS})`),
+      },
+    },
+    withProject(
+      { catchPrefix: 'Failed to wait for condition' },
+      async ({ project_path, condition, timeout_ms, poll_interval_ms }) => {
+        if (!ctx.activeProcess) {
+          return toolError('No active Godot process. Cannot wait for condition.', [
+            'Use run_project to start a Godot project first',
+            'Ensure the RuntimeHelper autoload is injected (inject_helpers, default true)',
+          ]);
+        }
+
+        // Per-type required fields (structured spec validation).
+        switch (condition.type) {
+          case 'node_exists':
+            if (!condition.node_path) {
+              return toolError("wait_for: 'node_path' is required for node_exists", []);
+            }
+            break;
+          case 'property':
+            if (!condition.node_path) {
+              return toolError("wait_for: 'node_path' is required for property conditions", []);
+            }
+            if (!condition.property || !PROPERTY_PATH_RE.test(condition.property)) {
+              return toolError(
+                'wait_for: property must be an identifier or colon-separated subpath ' +
+                  '(structured params only; expression strings are not accepted)',
+                ['Pass the property path alone, e.g. property: "position:x"'],
+              );
+            }
+            if (condition.value === undefined) {
+              return toolError("wait_for: 'value' is required for property conditions", []);
+            }
+            break;
+          case 'group_count':
+            if (!condition.group) {
+              return toolError("wait_for: 'group' is required for group_count", []);
+            }
+            if (condition.value === undefined) {
+              return toolError("wait_for: 'value' is required for group_count", []);
+            }
+            break;
+          case 'elapsed_frames':
+            if (condition.frames === undefined) {
+              return toolError("wait_for: 'frames' is required for elapsed_frames", []);
+            }
+            break;
+        }
+
+        const timeoutMs = timeout_ms ?? WAIT_FOR_DEFAULT_TIMEOUT_MS;
+        const pollMs = poll_interval_ms ?? WAIT_FOR_POLL_INTERVAL_MS;
+        const startTime = Date.now();
+        let sinceFrame: number | null = null;
+        let lastObserved: unknown = null;
+        let polls = 0;
+
+        for (;;) {
+          const spec: Record<string, unknown> = { ...condition };
+          if (condition.type === 'elapsed_frames' && sinceFrame !== null) {
+            spec.since_frame = sinceFrame;
+          }
+
+          let result: Record<string, unknown>;
+          try {
+            result = await triggerAndPoll(project_path, 'check_condition', { condition: spec });
+          } catch (error: unknown) {
+            if (error instanceof Error && error.message === 'timeout') {
+              return toolError(
+                'wait_for: the RuntimeHelper did not respond within 5 seconds.',
+                HELPER_TIMEOUT_SUGGESTIONS,
+              );
+            }
+            throw error;
+          }
+          polls += 1;
+
+          if (typeof result.error === 'string') {
+            return toolError(`wait_for condition error: ${result.error}`, [
+              'Check the condition spec (type, op, value shapes)',
+            ]);
+          }
+
+          lastObserved = result.observed ?? null;
+
+          if (condition.type === 'elapsed_frames' && sinceFrame === null) {
+            // Baseline poll: anchor the frame window at the first response.
+            sinceFrame = Number(result.observed ?? 0);
+          } else if (result.passed === true) {
+            return textResult(
+              JSON.stringify(
+                {
+                  passed: true,
+                  observed: lastObserved,
+                  polls,
+                  elapsed_ms: Date.now() - startTime,
+                },
+                null,
+                2,
+              ),
+            );
+          }
+
+          if (Date.now() - startTime >= timeoutMs) {
+            return toolError(
+              `wait_for timed out after ${timeoutMs}ms; condition never became true. ` +
+                `Last observed value: ${JSON.stringify(lastObserved)}`,
+              [
+                'Increase timeout_ms if the condition simply needs more time',
+                'Verify the condition spec (node path, property name, expected value)',
+                'Use inspect_node to check the current property value directly',
+              ],
+            );
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, pollMs));
+        }
       },
     ),
   );
