@@ -302,3 +302,125 @@ describe('restoreHelperInjection', () => {
     expect(ctx.helperInjection).toBe(injection);
   });
 });
+
+describe('restore/inject race regressions', () => {
+  let ctx: ServerContext;
+
+  const OUR_ENTRY = '[autoload]\nRuntimeHelper="*res://.godot/mcp/runtime_helper.gd"\n';
+  const USER_ENTRY = '[autoload]\nRuntimeHelper="*res://scripts/user_helper.gd"\n';
+  const USER_VALUE = '*res://scripts/user_helper.gd';
+
+  const flushMicrotasks = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ctx = createTestContext();
+  });
+
+  it('injection waits out an in-flight spontaneous-exit restore before reading project.godot', async () => {
+    // F1 regression: the game exited spontaneously; the exit handler fired
+    // an unawaited restore (~1s headless Godot). A run_project arriving
+    // inside that window must NOT read project.godot mid-restore and adopt
+    // the entry the restore is about to overwrite.
+    const injection = { projectPath: '/my/project', previousValue: USER_VALUE };
+    ctx.helperInjection = injection;
+
+    // Simulated project.godot: still holds OUR entry until the restore lands
+    let projectGodot = OUR_ENTRY;
+    let releaseRestore!: () => void;
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockImplementation(((p: unknown) => {
+      if (String(p).endsWith('project.godot')) return projectGodot;
+      return '## helper source\n';
+    }) as typeof readFileSync);
+    vi.mocked(runOperation).mockImplementation(async (_c, _p, _op, params) => {
+      if ((params as Record<string, unknown>).value === USER_VALUE) {
+        // The restore write: blocks until the test releases it
+        await new Promise<void>((resolve) => {
+          releaseRestore = resolve;
+        });
+        projectGodot = USER_ENTRY;
+        return OP_OK;
+      }
+      // The fresh injection write
+      projectGodot = OUR_ENTRY;
+      return OP_OK;
+    });
+
+    // Exit handler: fire-and-forget restore (claims the record, starts the write)
+    const restorePromise = restoreHelperInjection(ctx, injection);
+    // run_project arrives immediately after
+    const injectPromise = injectRuntimeHelper(ctx, '/my/project');
+    let injectSettled = false;
+    void injectPromise.then(() => {
+      injectSettled = true;
+    });
+
+    await flushMicrotasks();
+    // Injection must be parked on ctx.helperRestoreInFlight, NOT self-healed
+    expect(injectSettled).toBe(false);
+
+    releaseRestore();
+    expect(await restorePromise).toBe(true);
+    const result = await injectPromise;
+
+    // Injection saw the POST-restore state: no bogus adoption of an entry
+    // that was about to be rewritten — the user's value is re-recorded so
+    // the eventual stop puts it back instead of deleting it.
+    expect(result.injected).toBe(true);
+    expect(result.selfHealed).toBe(false);
+    expect(result.injection?.previousValue).toBe(USER_VALUE);
+    expect(ctx.helperRestoreInFlight).toBeNull();
+  });
+
+  it('self-heal inherits the re-armed record previousValue after repeated restore failures', async () => {
+    // F2 regression: restore fails persistently -> record re-armed with the
+    // user's value P -> next run's self-heal must inherit P, not adopt null
+    // (which would delete the user's own entry at the eventual stop).
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockImplementation(((p: unknown) => {
+      if (String(p).endsWith('project.godot')) return OUR_ENTRY;
+      return '## helper source\n';
+    }) as typeof readFileSync);
+
+    const injection = { projectPath: '/my/project', previousValue: USER_VALUE };
+    ctx.helperInjection = injection;
+
+    // stop_project: restore fails -> re-armed
+    vi.mocked(runOperation).mockResolvedValueOnce(OP_FAIL);
+    expect(await restoreHelperInjection(ctx, injection)).toBe(false);
+    expect(ctx.helperInjection).toBe(injection);
+
+    // next run_project: our entry still present -> self-heal, P preserved
+    const result = await injectRuntimeHelper(ctx, '/my/project');
+    expect(result.selfHealed).toBe(true);
+    expect(result.injection?.previousValue).toBe(USER_VALUE);
+    expect(ctx.helperInjection).toBe(result.injection);
+
+    // eventual successful restore sets the user's value back (not a delete)
+    vi.mocked(runOperation).mockResolvedValueOnce(OP_OK);
+    expect(await restoreHelperInjection(ctx, ctx.helperInjection)).toBe(true);
+    expect(runOperation).toHaveBeenLastCalledWith(ctx, '/my/project', 'modify_project_setting', {
+      section: 'autoload',
+      key: 'RuntimeHelper',
+      value: USER_VALUE,
+      action: 'set',
+    });
+  });
+
+  it('does not inherit previousValue from a live record belonging to a different project', async () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockImplementation(((p: unknown) => {
+      if (String(p).endsWith('project.godot')) return OUR_ENTRY;
+      return '## helper source\n';
+    }) as typeof readFileSync);
+
+    ctx.helperInjection = { projectPath: '/other/project', previousValue: USER_VALUE };
+
+    const result = await injectRuntimeHelper(ctx, '/my/project');
+
+    expect(result.selfHealed).toBe(true);
+    // A different project's record proves nothing about THIS project.godot
+    expect(result.injection?.previousValue).toBeNull();
+  });
+});

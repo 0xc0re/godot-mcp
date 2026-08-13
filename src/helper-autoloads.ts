@@ -103,6 +103,16 @@ export async function injectRuntimeHelper(
   };
 
   try {
+    // 0. Wait out any in-flight restore before reading project.godot. When
+    //    the game exits SPONTANEOUSLY (crash, window closed), the exit
+    //    handler fires an unawaited restore; a run_project landing inside
+    //    that ~1s window would otherwise read project.godot mid-restore and
+    //    adopt an entry that the in-flight delete/set is about to change
+    //    underneath us. Loop: a new restore could start while awaiting.
+    while (ctx.helperRestoreInFlight) {
+      await ctx.helperRestoreInFlight;
+    }
+
     // 1. Copy the helper into the project if missing or stale.
     const srcPath = join(dirname(ctx.operationsScriptPath), HELPER_FILENAME);
     if (!existsSync(srcPath)) {
@@ -139,12 +149,18 @@ export async function injectRuntimeHelper(
 
     // 3. Self-heal / idempotent fast path: an entry already pointing at our
     //    .godot/mcp copy is our own leftover (previous run died without
-    //    cleanup) — adopt it as "previously absent" so restoration removes
-    //    it, and skip the Godot spawn entirely.
+    //    cleanup) — adopt it and skip the Godot spawn entirely. If a LIVE
+    //    record for this project still exists (e.g. re-armed after a failed
+    //    restore), inherit its previousValue instead of adopting null:
+    //    otherwise the user's own pre-injection entry value would be lost
+    //    in-memory and their entry deleted at the eventual stop.
     if (rawValue !== undefined && rawValue.includes(HELPER_AUTOLOAD_VALUE)) {
+      const live = ctx.helperInjection;
+      const inheritedPreviousValue =
+        live && live.projectPath === projectPath ? live.previousValue : null;
       result.injected = true;
       result.selfHealed = true;
-      result.injection = { projectPath, previousValue: null };
+      result.injection = { projectPath, previousValue: inheritedPreviousValue };
       ctx.helperInjection = result.injection;
       return result;
     }
@@ -177,31 +193,8 @@ export async function injectRuntimeHelper(
   }
 }
 
-/**
- * Restore the project.godot autoload state recorded by injectRuntimeHelper.
- *
- * Guarded against double restoration: the record is claimed synchronously
- * (ctx.helperInjection cleared) before any async work, so of the several
- * callers that may race — stop_project, run_project's pre-run cleanup, and
- * the spawned process's exit/error handlers — exactly one performs the
- * restore and the rest no-op. Passing a stale record (no longer the current
- * ctx.helperInjection) is also a no-op.
- *
- * Best-effort: on failure the record is re-armed so a later run/stop can
- * retry (and the next injectRuntimeHelper self-heals regardless).
- *
- * Returns true when the previous state was successfully restored.
- */
-export async function restoreHelperInjection(
-  ctx: ServerContext,
-  injection: HelperInjection | null | undefined,
-): Promise<boolean> {
-  if (!injection || ctx.helperInjection !== injection) {
-    return false;
-  }
-  // Claim the record synchronously so concurrent callers no-op.
-  ctx.helperInjection = null;
-
+/** The actual restore write. Never throws (runOperation returns verdicts). */
+async function performRestore(ctx: ServerContext, injection: HelperInjection): Promise<boolean> {
   const params =
     injection.previousValue === null
       ? { section: 'autoload', key: HELPER_AUTOLOAD_NAME, action: 'delete' }
@@ -226,4 +219,49 @@ export async function restoreHelperInjection(
   }
 
   return true;
+}
+
+/**
+ * Restore the project.godot autoload state recorded by injectRuntimeHelper.
+ *
+ * Guarded against double restoration: the record is claimed synchronously
+ * (ctx.helperInjection cleared) before any async work, so of the several
+ * callers that may race — stop_project, run_project's pre-run cleanup, and
+ * the spawned process's exit/error handlers — exactly one performs the
+ * restore and the rest no-op. Passing a stale record (no longer the current
+ * ctx.helperInjection) is also a no-op.
+ *
+ * The restore write is tracked on ctx.helperRestoreInFlight (and chained
+ * behind any prior in-flight restore) so injectRuntimeHelper can await it —
+ * a spontaneous game exit fires this fire-and-forget from the exit handler,
+ * and the next run must not read project.godot mid-restore.
+ *
+ * Best-effort: on failure the record is re-armed so a later run/stop can
+ * retry (and the next injectRuntimeHelper self-heals, inheriting the
+ * re-armed record's previousValue).
+ *
+ * Returns true when the previous state was successfully restored.
+ */
+export async function restoreHelperInjection(
+  ctx: ServerContext,
+  injection: HelperInjection | null | undefined,
+): Promise<boolean> {
+  if (!injection || ctx.helperInjection !== injection) {
+    return false;
+  }
+  // Claim the record synchronously so concurrent callers no-op.
+  ctx.helperInjection = null;
+
+  // Serialize behind any prior in-flight restore (a different record's
+  // write could still be running) and expose this write for awaiting.
+  const prior = ctx.helperRestoreInFlight ?? Promise.resolve(false);
+  const work = prior.then(() => performRestore(ctx, injection));
+  ctx.helperRestoreInFlight = work;
+  void work.then(() => {
+    if (ctx.helperRestoreInFlight === work) {
+      ctx.helperRestoreInFlight = null;
+    }
+  });
+
+  return work;
 }

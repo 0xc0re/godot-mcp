@@ -29,6 +29,12 @@ export interface ServerContext {
    * (see helper-autoloads.ts). Non-null only while an injection is live.
    */
   helperInjection?: HelperInjection | null;
+  /**
+   * In-flight restore write, tracked so injectRuntimeHelper can wait it out
+   * before reading project.godot (a spontaneous game exit fires an
+   * unawaited restore from the exit handler). Cleared when the write lands.
+   */
+  helperRestoreInFlight?: Promise<boolean> | null;
 }
 
 /**
