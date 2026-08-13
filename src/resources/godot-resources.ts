@@ -10,6 +10,7 @@ import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, relative, basename } from 'path';
 import type { ServerContext } from '../types.js';
+import { resolveWithinProject } from '../godot.js';
 
 /**
  * Recursively find files matching a given extension, skipping .godot/ and .git/ dirs.
@@ -58,6 +59,37 @@ function resolveProjectPath(): string | null {
 }
 
 /**
+ * Resolve a resource-template path variable to an absolute file path that is
+ * guaranteed to stay inside the resolved Godot project, with an extension
+ * allowlist per resource type.
+ *
+ * Throws (denying the read) when no project resolves, when the path escapes
+ * the project directory (traversal/absolute/symlink/null-byte), or when the
+ * extension is not allowed. Never falls back to reading the raw path.
+ */
+function resolveResourceFilePath(rawPath: string, allowedExtension: string): string {
+  const projectPath = resolveProjectPath();
+  if (!projectPath) {
+    throw new Error(
+      'Access denied: no Godot project resolved (set GODOT_PROJECT_PATH or run from a project directory)',
+    );
+  }
+
+  const resolved = resolveWithinProject(projectPath, rawPath);
+  if (resolved === null) {
+    throw new Error(`Access denied: path resolves outside the project directory: ${rawPath}`);
+  }
+
+  if (!resolved.endsWith(allowedExtension)) {
+    throw new Error(
+      `Access denied: only ${allowedExtension} files can be read through this resource`,
+    );
+  }
+
+  return resolved;
+}
+
+/**
  * Register MCP resources for Godot scenes and scripts.
  *
  * Registers two dynamic resource templates:
@@ -91,9 +123,8 @@ export function registerGodotResources(server: McpServer, _ctx: ServerContext): 
       mimeType: 'text/plain',
     },
     async (uri, variables) => {
-      const projectPath = resolveProjectPath();
       const filePath = decodeURIComponent(String(variables.path));
-      const absolutePath = projectPath ? join(projectPath, filePath) : filePath;
+      const absolutePath = resolveResourceFilePath(filePath, '.tscn');
 
       const content = readFileSync(absolutePath, 'utf-8');
       return {
@@ -128,9 +159,8 @@ export function registerGodotResources(server: McpServer, _ctx: ServerContext): 
       mimeType: 'text/plain',
     },
     async (uri, variables) => {
-      const projectPath = resolveProjectPath();
       const filePath = decodeURIComponent(String(variables.path));
-      const absolutePath = projectPath ? join(projectPath, filePath) : filePath;
+      const absolutePath = resolveResourceFilePath(filePath, '.gd');
 
       const content = readFileSync(absolutePath, 'utf-8');
       return {

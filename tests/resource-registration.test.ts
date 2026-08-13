@@ -19,6 +19,9 @@ vi.mock('fs', async () => {
     readFileSync: vi.fn(),
     readdirSync: vi.fn(),
     statSync: vi.fn(),
+    // Identity realpath so the real resolveWithinProject containment logic can
+    // run against the fake /test/project tree without touching the real fs.
+    realpathSync: vi.fn((p: unknown) => String(p)),
   };
 });
 
@@ -227,6 +230,111 @@ describe('MCP Resource Registration', () => {
     expect(result.contents).toHaveLength(1);
     expect(result.contents[0].uri).toBe('godot://script/scripts/player.gd');
     expect(result.contents[0].text).toBe('extends Node2D\n\nfunc _ready():\n\tpass');
+
+    process.env.GODOT_PROJECT_PATH = origEnv;
+  });
+
+  it('scene read callback denies ".." traversal outside the project', async () => {
+    const origEnv = process.env.GODOT_PROJECT_PATH;
+    process.env.GODOT_PROJECT_PATH = '/test/project';
+
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue('root:x:0:0');
+
+    registerGodotResources(server, ctx);
+
+    const sceneCall = registerResourceSpy.mock.calls.find(
+      (call) => call[0] === 'godot-scene',
+    );
+    const readCallback = sceneCall![3] as (uri: URL, variables: Record<string, string>, extra: unknown) => Promise<unknown>;
+
+    await expect(
+      readCallback(
+        new URL('godot://scene/../../../etc/passwd'),
+        { path: '../../../etc/passwd' },
+        {} as never,
+      ),
+    ).rejects.toThrow(/Access denied/);
+    expect(readFileSync).not.toHaveBeenCalled();
+
+    process.env.GODOT_PROJECT_PATH = origEnv;
+  });
+
+  it('script read callback denies absolute paths outside the project', async () => {
+    const origEnv = process.env.GODOT_PROJECT_PATH;
+    process.env.GODOT_PROJECT_PATH = '/test/project';
+
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue('secret');
+
+    registerGodotResources(server, ctx);
+
+    const scriptCall = registerResourceSpy.mock.calls.find(
+      (call) => call[0] === 'godot-script',
+    );
+    const readCallback = scriptCall![3] as (uri: URL, variables: Record<string, string>, extra: unknown) => Promise<unknown>;
+
+    await expect(
+      readCallback(
+        new URL('godot://script/x.gd'),
+        { path: '/etc/shadow.gd' },
+        {} as never,
+      ),
+    ).rejects.toThrow(/Access denied/);
+    expect(readFileSync).not.toHaveBeenCalled();
+
+    process.env.GODOT_PROJECT_PATH = origEnv;
+  });
+
+  it('read callbacks deny when no project resolves (no arbitrary-read fallback)', async () => {
+    const origEnv = process.env.GODOT_PROJECT_PATH;
+    delete process.env.GODOT_PROJECT_PATH;
+
+    // No project.godot anywhere -> resolveProjectPath() returns null
+    vi.mocked(existsSync).mockReturnValue(false);
+    vi.mocked(readFileSync).mockReturnValue('root:x:0:0');
+
+    registerGodotResources(server, ctx);
+
+    const sceneCall = registerResourceSpy.mock.calls.find(
+      (call) => call[0] === 'godot-scene',
+    );
+    const readCallback = sceneCall![3] as (uri: URL, variables: Record<string, string>, extra: unknown) => Promise<unknown>;
+
+    await expect(
+      readCallback(
+        new URL('godot://scene/etc/passwd'),
+        { path: '/etc/passwd' },
+        {} as never,
+      ),
+    ).rejects.toThrow(/Access denied/);
+    expect(readFileSync).not.toHaveBeenCalled();
+
+    process.env.GODOT_PROJECT_PATH = origEnv;
+  });
+
+  it('scene read callback denies non-.tscn files (extension allowlist)', async () => {
+    const origEnv = process.env.GODOT_PROJECT_PATH;
+    process.env.GODOT_PROJECT_PATH = '/test/project';
+
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue('data');
+
+    registerGodotResources(server, ctx);
+
+    const sceneCall = registerResourceSpy.mock.calls.find(
+      (call) => call[0] === 'godot-scene',
+    );
+    const readCallback = sceneCall![3] as (uri: URL, variables: Record<string, string>, extra: unknown) => Promise<unknown>;
+
+    await expect(
+      readCallback(
+        new URL('godot://scene/project.godot'),
+        { path: 'project.godot' },
+        {} as never,
+      ),
+    ).rejects.toThrow(/Access denied/);
+    expect(readFileSync).not.toHaveBeenCalled();
 
     process.env.GODOT_PROJECT_PATH = origEnv;
   });
