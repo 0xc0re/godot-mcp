@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { execGodot, runOperation, isGodot44OrLater, validatePath } from '../godot.js';
+import { execGodot, runOperation, isGodot44OrLater, resolveWithinProject, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 
 export function registerUidTools(server: McpServer, ctx: ServerContext): void {
@@ -43,7 +43,13 @@ export function registerUidTools(server: McpServer, ctx: ServerContext): void {
           ]);
         }
 
-        const filePath = join(project_path, file_path);
+        const filePath = resolveWithinProject(project_path, file_path);
+        if (filePath === null) {
+          return toolError('Invalid file_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
         if (!existsSync(filePath)) {
           return toolError(`File does not exist: ${file_path}`, [
             'Ensure the file path is correct',

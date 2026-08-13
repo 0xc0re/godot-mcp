@@ -508,5 +508,46 @@ describe('Diagnostics MCP Tools', () => {
       await expectPathRejected('validate_scene', { project_path: '/proj', scene_path: '../../../etc/passwd' }, 'scene_path');
       expect(readFileSync).not.toHaveBeenCalled();
     });
+
+    it('validate_scene skips the autoload check when a crafted ext_resource path escapes the project', async () => {
+      vi.mocked(readFileSync).mockReturnValue('');
+
+      // A malicious .tscn whose root script ext_resource points outside the project
+      const mockScene: ParsedScene = {
+        format: 3,
+        loadSteps: 2,
+        extResources: [
+          { type: 'Script', path: 'res://../../../outside/evil.gd', id: '1_esc' },
+        ],
+        subResources: [],
+        nodes: [
+          {
+            name: 'Player',
+            type: 'Node3D',
+            properties: { script: 'ExtResource("1_esc")' },
+          },
+        ],
+        connections: [],
+      };
+      vi.mocked(parseScene).mockReturnValue(mockScene);
+
+      const handler = handlers.get('validate_scene')!;
+      const result = (await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/player.tscn',
+      })) as { isError?: boolean; content: Array<{ text: string }> };
+
+      // The tool succeeds — the unsafe entry is skipped, not a hard error
+      expect(result.isError).toBeFalsy();
+      const parsed = JSON.parse(result.content[0].text);
+      const autoloadIssue = parsed.issues.find(
+        (i: { check: string }) => i.check === 'root_script_references_autoloads',
+      );
+      expect(autoloadIssue).toBeUndefined();
+
+      // The out-of-project script file must never be read
+      const readPaths = vi.mocked(readFileSync).mock.calls.map((c) => String(c[0]));
+      expect(readPaths.some((p) => p.includes('evil.gd'))).toBe(false);
+    });
   });
 });

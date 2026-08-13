@@ -363,10 +363,14 @@ export function registerDiagnosticsTools(server: McpServer, ctx: ServerContext):
                 (r) => r.id === extResId && r.type === 'Script',
               );
               if (scriptResource) {
-                // Convert res:// path to filesystem path
+                // Convert res:// path to filesystem path. The path comes from
+                // scene-file content, so a crafted .tscn could point outside
+                // the project (e.g. res://../../../x). Resolve it safely and
+                // skip this check (rather than erroring the whole tool) when
+                // it escapes the project directory.
                 const scriptResPath = scriptResource.path.replace(/^res:\/\//, '');
-                const scriptFilePath = join(project_path, scriptResPath);
-                if (existsSync(scriptFilePath)) {
+                const scriptFilePath = resolveWithinProject(project_path, scriptResPath);
+                if (scriptFilePath !== null && existsSync(scriptFilePath)) {
                   const scriptContent = readFileSync(scriptFilePath, 'utf-8');
 
                   // Parse project.godot to get autoload names
