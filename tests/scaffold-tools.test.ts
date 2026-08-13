@@ -136,8 +136,9 @@ describe('Scaffold MCP Tools', () => {
     it('generates correct GDScript for signals without params', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockImplementation((p: unknown) => {
+        // project.godot exists; the scaffold target does not (fresh write)
         if (String(p).endsWith('project.godot')) return true;
-        return true;
+        return false;
       });
 
       const handler = handlers.get('scaffold_event_bus')!;
@@ -157,8 +158,9 @@ describe('Scaffold MCP Tools', () => {
     it('generates correct GDScript for signals with typed params', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockImplementation((p: unknown) => {
+        // project.godot exists; the scaffold target does not (fresh write)
         if (String(p).endsWith('project.godot')) return true;
-        return true;
+        return false;
       });
 
       const handler = handlers.get('scaffold_event_bus')!;
@@ -198,8 +200,9 @@ describe('Scaffold MCP Tools', () => {
     it('does NOT register autoload when register_autoload is false', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockImplementation((p: unknown) => {
+        // project.godot exists; the scaffold target does not (fresh write)
         if (String(p).endsWith('project.godot')) return true;
-        return true;
+        return false;
       });
 
       const handler = handlers.get('scaffold_event_bus')!;
@@ -216,8 +219,9 @@ describe('Scaffold MCP Tools', () => {
     it('registers autoload when register_autoload is true', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockImplementation((p: unknown) => {
+        // project.godot exists; the scaffold target does not (fresh write)
         if (String(p).endsWith('project.godot')) return true;
-        return true;
+        return false;
       });
       vi.mocked(runOperation).mockResolvedValue(OP_OK);
 
@@ -243,8 +247,9 @@ describe('Scaffold MCP Tools', () => {
     it('derives PascalCase autoload name from filename', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockImplementation((p: unknown) => {
+        // project.godot exists; the scaffold target does not (fresh write)
         if (String(p).endsWith('project.godot')) return true;
-        return true;
+        return false;
       });
       vi.mocked(runOperation).mockResolvedValue(OP_OK);
 
@@ -269,8 +274,9 @@ describe('Scaffold MCP Tools', () => {
     it('uses provided autoload_name when given', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockImplementation((p: unknown) => {
+        // project.godot exists; the scaffold target does not (fresh write)
         if (String(p).endsWith('project.godot')) return true;
-        return true;
+        return false;
       });
       vi.mocked(runOperation).mockResolvedValue(OP_OK);
 
@@ -295,7 +301,8 @@ describe('Scaffold MCP Tools', () => {
 
     it('returns toolError when autoload registration yields ok:false', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
-      vi.mocked(existsSync).mockReturnValue(true);
+      // project.godot exists; the scaffold target does not (fresh write)
+      vi.mocked(existsSync).mockImplementation((p) => String(p).endsWith('project.godot'));
       vi.mocked(runOperation).mockResolvedValue({
         ok: false,
         error: 'Failed to save project.godot: error code 7',
@@ -322,8 +329,9 @@ describe('Scaffold MCP Tools', () => {
     it('returns success JSON with signal count', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockImplementation((p: unknown) => {
+        // project.godot exists; the scaffold target does not (fresh write)
         if (String(p).endsWith('project.godot')) return true;
-        return true;
+        return false;
       });
 
       const handler = handlers.get('scaffold_event_bus')!;
@@ -364,7 +372,8 @@ describe('Scaffold MCP Tools', () => {
 
     it('generates ConfigFile load/save with typed vars and setters', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
-      vi.mocked(existsSync).mockReturnValue(true);
+      // project.godot exists; the scaffold target does not (fresh write)
+      vi.mocked(existsSync).mockImplementation((p) => String(p).endsWith('project.godot'));
       const handler = handlers.get('scaffold_config_manager')!;
       await handler({
         project_path: '/my/project',
@@ -391,7 +400,8 @@ describe('Scaffold MCP Tools', () => {
 
     it('supports multiple sections', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
-      vi.mocked(existsSync).mockReturnValue(true);
+      // project.godot exists; the scaffold target does not (fresh write)
+      vi.mocked(existsSync).mockImplementation((p) => String(p).endsWith('project.godot'));
       const handler = handlers.get('scaffold_config_manager')!;
       await handler({
         project_path: '/my/project',
@@ -410,7 +420,8 @@ describe('Scaffold MCP Tools', () => {
 
     it('registers autoload when requested', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
-      vi.mocked(existsSync).mockReturnValue(true);
+      // project.godot exists; the scaffold target does not (fresh write)
+      vi.mocked(existsSync).mockImplementation((p) => String(p).endsWith('project.godot'));
       vi.mocked(runOperation).mockResolvedValue(OP_OK);
       const handler = handlers.get('scaffold_config_manager')!;
       await handler({
@@ -429,7 +440,8 @@ describe('Scaffold MCP Tools', () => {
 
     it('returns toolError when autoload registration yields ok:false', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
-      vi.mocked(existsSync).mockReturnValue(true);
+      // project.godot exists; the scaffold target does not (fresh write)
+      vi.mocked(existsSync).mockImplementation((p) => String(p).endsWith('project.godot'));
       vi.mocked(runOperation).mockResolvedValue({
         ok: false,
         error: 'Failed to load project.godot: error code 12',
@@ -476,7 +488,8 @@ describe('Scaffold MCP Tools', () => {
 
     it('generates class_name Resource with @export fields', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
-      vi.mocked(existsSync).mockReturnValue(true);
+      // project.godot exists; the scaffold target does not (fresh write)
+      vi.mocked(existsSync).mockImplementation((p) => String(p).endsWith('project.godot'));
       const handler = handlers.get('scaffold_resource_class')!;
       await handler({
         project_path: '/my/project',
@@ -500,7 +513,8 @@ describe('Scaffold MCP Tools', () => {
 
     it('returns success JSON with field count', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
-      vi.mocked(existsSync).mockReturnValue(true);
+      // project.godot exists; the scaffold target does not (fresh write)
+      vi.mocked(existsSync).mockImplementation((p) => String(p).endsWith('project.godot'));
       const handler = handlers.get('scaffold_resource_class')!;
       const result = await handler({
         project_path: '/my/project',
@@ -538,7 +552,8 @@ describe('Scaffold MCP Tools', () => {
 
     it('generates test stubs for public methods', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
-      vi.mocked(existsSync).mockReturnValue(true);
+      // project.godot and the source script exist; the target test file does not
+      vi.mocked(existsSync).mockImplementation((p) => !String(p).includes('/tests/'));
       vi.mocked(readFileSync).mockReturnValue(
         'extends Node\n\nfunc check_best_score(score: int) -> void:\n\tpass\n\nfunc reset() -> void:\n\tpass\n\nfunc _private_method() -> void:\n\tpass\n',
       );
@@ -558,7 +573,8 @@ describe('Scaffold MCP Tools', () => {
 
     it('generates signal assertions', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
-      vi.mocked(existsSync).mockReturnValue(true);
+      // project.godot and the source script exist; the target test file does not
+      vi.mocked(existsSync).mockImplementation((p) => !String(p).includes('/tests/'));
       vi.mocked(readFileSync).mockReturnValue(
         'extends Node\n\nsignal player_died\nsignal score_updated(score: int)\n\nfunc do_thing() -> void:\n\tpass\n',
       );
@@ -577,7 +593,8 @@ describe('Scaffold MCP Tools', () => {
 
     it('defaults test_path to tests/test_<filename>.gd', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
-      vi.mocked(existsSync).mockReturnValue(true);
+      // project.godot and the source script exist; the target test file does not
+      vi.mocked(existsSync).mockImplementation((p) => !String(p).includes('/tests/'));
       vi.mocked(readFileSync).mockReturnValue('extends Node\nfunc do_thing() -> void:\n\tpass\n');
 
       const handler = handlers.get('scaffold_tests')!;
@@ -610,7 +627,8 @@ describe('Scaffold MCP Tools', () => {
 
     it('generates health component with signals and methods', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
-      vi.mocked(existsSync).mockReturnValue(true);
+      // project.godot exists; the scaffold target does not (fresh write)
+      vi.mocked(existsSync).mockImplementation((p) => String(p).endsWith('project.godot'));
       const handler = handlers.get('scaffold_health_component')!;
       await handler({
         project_path: '/my/project',
@@ -630,7 +648,8 @@ describe('Scaffold MCP Tools', () => {
 
     it('uses custom max_health and invincibility_duration', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
-      vi.mocked(existsSync).mockReturnValue(true);
+      // project.godot exists; the scaffold target does not (fresh write)
+      vi.mocked(existsSync).mockImplementation((p) => String(p).endsWith('project.godot'));
       const handler = handlers.get('scaffold_health_component')!;
       await handler({
         project_path: '/my/project',
@@ -642,6 +661,121 @@ describe('Scaffold MCP Tools', () => {
       const written = vi.mocked(writeFileSync).mock.calls[0][1] as string;
       expect(written).toContain('@export var max_health: int = 50');
       expect(written).toContain('@export var invincibility_duration: float = 0.5');
+    });
+  });
+
+  // ── overwrite flag (default false: refuse to clobber) ───────────────
+
+  describe('overwrite flag', () => {
+    beforeEach(() => {
+      vi.mocked(validatePath).mockReturnValue(true);
+    });
+
+    it('scaffold_event_bus refuses to overwrite an existing target by default', async () => {
+      // project.godot AND the target file exist
+      vi.mocked(existsSync).mockReturnValue(true);
+
+      const handler = handlers.get('scaffold_event_bus')!;
+      const result = await handler({
+        project_path: '/my/project',
+        script_path: 'scripts/event_bus.gd',
+        signals: [{ name: 'player_died', params: [] }],
+      }) as { isError?: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBe(true);
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.error).toContain('scripts/event_bus.gd');
+      expect(writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it('scaffold_event_bus overwrites when overwrite: true', async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+
+      const handler = handlers.get('scaffold_event_bus')!;
+      const result = await handler({
+        project_path: '/my/project',
+        script_path: 'scripts/event_bus.gd',
+        signals: [{ name: 'player_died', params: [] }],
+        overwrite: true,
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBeUndefined();
+      expect(writeFileSync).toHaveBeenCalledTimes(1);
+    });
+
+    it('scaffold_config_manager refuses to overwrite by default', async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+
+      const handler = handlers.get('scaffold_config_manager')!;
+      const result = await handler({
+        project_path: '/my/project',
+        script_path: 'scripts/settings.gd',
+        save_path: 'user://settings.cfg',
+        sections: [{ name: 'audio', fields: [{ name: 'volume', type: 'float', default: '1.0' }] }],
+      }) as { isError?: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[0].text).error).toContain('scripts/settings.gd');
+      expect(writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it('scaffold_resource_class refuses to overwrite by default', async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+
+      const handler = handlers.get('scaffold_resource_class')!;
+      const result = await handler({
+        project_path: '/my/project',
+        script_path: 'scripts/data.gd',
+        class_name: 'MyData',
+        fields: [{ name: 'a', type: 'int' }],
+      }) as { isError?: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[0].text).error).toContain('scripts/data.gd');
+      expect(writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it('scaffold_tests refuses to overwrite an existing test file by default', async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('extends Node\nfunc do_thing() -> void:\n\tpass\n');
+
+      const handler = handlers.get('scaffold_tests')!;
+      const result = await handler({
+        project_path: '/my/project',
+        script_path: 'scripts/event_bus.gd',
+      }) as { isError?: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[0].text).error).toContain('tests/test_event_bus.gd');
+      expect(writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it('scaffold_health_component refuses to overwrite by default', async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+
+      const handler = handlers.get('scaffold_health_component')!;
+      const result = await handler({
+        project_path: '/my/project',
+        script_path: 'scripts/health.gd',
+      }) as { isError?: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[0].text).error).toContain('scripts/health.gd');
+      expect(writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it('scaffold_health_component overwrites when overwrite: true', async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+
+      const handler = handlers.get('scaffold_health_component')!;
+      const result = await handler({
+        project_path: '/my/project',
+        script_path: 'scripts/health.gd',
+        overwrite: true,
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBeUndefined();
+      expect(writeFileSync).toHaveBeenCalledTimes(1);
     });
   });
 

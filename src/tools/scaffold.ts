@@ -35,6 +35,42 @@ function filenameWithoutExtension(filePath: string): string {
   return dotIndex > 0 ? base.substring(0, dotIndex) : base;
 }
 
+/** Shared zod schema for the scaffold overwrite flag (default: refuse to clobber). */
+const overwriteSchema = z
+  .boolean()
+  .optional()
+  .default(false)
+  .describe('Overwrite the target file if it already exists (default: false)');
+
+/**
+ * Guard against silently clobbering existing files.
+ *
+ * Returns a toolError listing the conflicting file(s) when overwrite is not
+ * set and any target already exists; null when the write may proceed.
+ * Each entry is [projectRelativePath, resolvedAbsolutePath].
+ */
+function checkOverwrite(
+  overwrite: boolean | undefined,
+  targets: Array<[string, string]>,
+): ReturnType<typeof toolError> | null {
+  if (overwrite) {
+    return null;
+  }
+  const conflicts = targets
+    .filter(([, absPath]) => existsSync(absPath))
+    .map(([relPath]) => relPath);
+  if (conflicts.length === 0) {
+    return null;
+  }
+  return toolError(
+    `Refusing to overwrite existing file(s): ${conflicts.join(', ')}`,
+    [
+      'Pass overwrite: true to replace the existing file(s)',
+      'Or choose a different target path',
+    ],
+  );
+}
+
 export function registerScaffoldTools(server: McpServer, ctx: ServerContext): void {
   // scaffold_event_bus tool
   server.registerTool(
@@ -78,6 +114,7 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
           .describe(
             'Name for the autoload (default: derived from filename, PascalCase)',
           ),
+        overwrite: overwriteSchema,
       },
     },
     withProject(
@@ -90,7 +127,7 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
         ],
         extraPaths: (a) => [a.script_path],
       },
-      async ({ project_path, script_path, signals, register_autoload, autoload_name }) => {
+      async ({ project_path, script_path, signals, register_autoload, autoload_name, overwrite }) => {
         // Generate GDScript content
         const signalLines = signals.map((sig) => {
           if (sig.params.length === 0) {
@@ -116,6 +153,12 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
         const fullPath = resolveWithinProject(project_path, script_path);
         if (fullPath === null) {
           return outsideProjectError('script_path');
+        }
+        const conflict = checkOverwrite(overwrite as boolean | undefined, [
+          [script_path, fullPath],
+        ]);
+        if (conflict) {
+          return conflict;
         }
         const parentDir = dirname(fullPath);
         if (!existsSync(parentDir)) {
@@ -203,6 +246,7 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
           .describe(
             'Name for the autoload (default: derived from filename, PascalCase)',
           ),
+        overwrite: overwriteSchema,
       },
     },
     withProject(
@@ -215,7 +259,7 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
         ],
         extraPaths: (a) => [a.script_path],
       },
-      async ({ project_path, script_path, save_path, sections, register_autoload, autoload_name }) => {
+      async ({ project_path, script_path, save_path, sections, register_autoload, autoload_name, overwrite }) => {
         // Flatten all fields from all sections for var declarations
         const allFields: { section: string; name: string; type: string; default: string }[] = [];
         for (const section of sections as { name: string; fields: { name: string; type: string; default: string }[] }[]) {
@@ -294,6 +338,12 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
         if (fullPath === null) {
           return outsideProjectError('script_path');
         }
+        const conflict = checkOverwrite(overwrite as boolean | undefined, [
+          [script_path as string, fullPath],
+        ]);
+        if (conflict) {
+          return conflict;
+        }
         const parentDir = dirname(fullPath);
         if (!existsSync(parentDir)) {
           mkdirSync(parentDir, { recursive: true });
@@ -366,6 +416,7 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
           )
           .min(1)
           .describe('Export fields with name, type, and optional default value'),
+        overwrite: overwriteSchema,
       },
     },
     withProject(
@@ -378,7 +429,7 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
         ],
         extraPaths: (a) => [a.script_path],
       },
-      async ({ project_path, script_path, class_name, fields }) => {
+      async ({ project_path, script_path, class_name, fields, overwrite }) => {
         // Generate @export lines
         const exportLines = (fields as { name: string; type: string; default?: string }[]).map((f) => {
           if (f.default !== undefined && f.default !== '') {
@@ -401,6 +452,12 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
         const fullPath = resolveWithinProject(project_path as string, script_path as string);
         if (fullPath === null) {
           return outsideProjectError('script_path');
+        }
+        const conflict = checkOverwrite(overwrite as boolean | undefined, [
+          [script_path as string, fullPath],
+        ]);
+        if (conflict) {
+          return conflict;
         }
         const parentDir = dirname(fullPath);
         if (!existsSync(parentDir)) {
@@ -442,6 +499,7 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
           .describe(
             'Where to write the test .gd file relative to project (default: tests/test_<filename>.gd)',
           ),
+        overwrite: overwriteSchema,
       },
     },
     withProject(
@@ -454,7 +512,7 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
         ],
         extraPaths: (a) => [a.script_path],
       },
-      async ({ project_path, script_path, test_path }) => {
+      async ({ project_path, script_path, test_path, overwrite }) => {
         // Read the source script (resolved inside the project)
         const sourceFullPath = resolveWithinProject(project_path as string, script_path as string);
         if (sourceFullPath === null) {
@@ -534,6 +592,12 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
         if (fullPath === null) {
           return outsideProjectError('test_path');
         }
+        const conflict = checkOverwrite(overwrite as boolean | undefined, [
+          [resolvedTestPath, fullPath],
+        ]);
+        if (conflict) {
+          return conflict;
+        }
         const parentDir = dirname(fullPath);
         if (!existsSync(parentDir)) {
           mkdirSync(parentDir, { recursive: true });
@@ -580,6 +644,7 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
           .optional()
           .default(0.3)
           .describe('Duration of invincibility frames in seconds (default: 0.3)'),
+        overwrite: overwriteSchema,
       },
     },
     withProject(
@@ -592,7 +657,7 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
         ],
         extraPaths: (a) => [a.script_path],
       },
-      async ({ project_path, script_path, max_health, invincibility_duration }) => {
+      async ({ project_path, script_path, max_health, invincibility_duration, overwrite }) => {
         const healthVal = (max_health as number) ?? 100;
         const invincVal = (invincibility_duration as number) ?? 0.3;
 
@@ -651,6 +716,12 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
         const fullPath = resolveWithinProject(project_path as string, script_path as string);
         if (fullPath === null) {
           return outsideProjectError('script_path');
+        }
+        const conflict = checkOverwrite(overwrite as boolean | undefined, [
+          [script_path as string, fullPath],
+        ]);
+        if (conflict) {
+          return conflict;
         }
         const parentDir = dirname(fullPath);
         if (!existsSync(parentDir)) {
