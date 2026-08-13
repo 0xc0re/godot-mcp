@@ -22,6 +22,24 @@ export interface AddNodeOptions {
   properties?: Record<string, unknown>;
 }
 
+/** Valid Godot identifier for node names and types written into [node] headers. */
+const IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * Escape a string for embedding inside a double-quoted .tscn string literal.
+ *
+ * Prevents quote/newline injection from breaking out of the literal and
+ * forging additional sections or properties in the scene file.
+ */
+function escapeTscnString(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t');
+}
+
 /**
  * Serialize a property value to Godot .tscn format.
  *
@@ -40,7 +58,7 @@ function serializeGodotValue(value: unknown): string {
     return String(value);
   }
   if (typeof value === 'string') {
-    return `"${value}"`;
+    return `"${escapeTscnString(value)}"`;
   }
   if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
     const obj = value as Record<string, unknown>;
@@ -58,7 +76,7 @@ function serializeGodotValue(value: unknown): string {
       return `Vector2(${obj.x}, ${obj.y})`;
     }
     // Fallback: JSON string
-    return `"${JSON.stringify(value)}"`;
+    return `"${escapeTscnString(JSON.stringify(value))}"`;
   }
   return String(value);
 }
@@ -95,6 +113,18 @@ export function addNodeToScene(content: string, opts: AddNodeOptions): string {
   // Validate that this is a .tscn file
   if (!content.trimStart().startsWith('[gd_scene')) {
     throw new Error('Invalid .tscn content: missing [gd_scene] header');
+  }
+
+  // Validate name/type so they cannot break out of the [node ...] header
+  if (!IDENTIFIER_RE.test(opts.nodeName)) {
+    throw new Error(
+      `Invalid node name "${opts.nodeName}": must match [A-Za-z_][A-Za-z0-9_]*`,
+    );
+  }
+  if (!IDENTIFIER_RE.test(opts.nodeType)) {
+    throw new Error(
+      `Invalid node type "${opts.nodeType}": must match [A-Za-z_][A-Za-z0-9_]*`,
+    );
   }
 
   const parent = resolveParentPath(opts.parentNodePath);

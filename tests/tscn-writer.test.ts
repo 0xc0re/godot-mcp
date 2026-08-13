@@ -7,6 +7,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { addNodeToScene } from '../src/parsers/tscn-writer.js';
+import { parseScene } from '../src/parsers/tscn-parser.js';
 
 // Minimal valid .tscn scene with root node
 const MINIMAL_SCENE = `[gd_scene load_steps=2 format=3 uid="uid://abc123"]
@@ -199,6 +200,77 @@ describe('tscn-writer', () => {
       expect(result).toContain('[ext_resource type="PackedScene" path="res://scenes/weapon.tscn" id="2_w"]');
       // New node added
       expect(result).toContain('[node name="HitBox" type="Area2D" parent="."]');
+    });
+
+    it('rejects a node name that tries to break out of the [node] header', () => {
+      expect(() => {
+        addNodeToScene(MINIMAL_SCENE, {
+          nodeType: 'Node2D',
+          nodeName: 'Evil" type="Node2D"] [node name="Injected',
+        });
+      }).toThrow(/Invalid node name/);
+    });
+
+    it('rejects a node type that tries to break out of the [node] header', () => {
+      expect(() => {
+        addNodeToScene(MINIMAL_SCENE, {
+          nodeType: 'Node2D"] [sub_resource type="GDScript',
+          nodeName: 'Safe',
+        });
+      }).toThrow(/Invalid node type/);
+    });
+
+    it('rejects node names with spaces or leading digits', () => {
+      expect(() => {
+        addNodeToScene(MINIMAL_SCENE, { nodeType: 'Node2D', nodeName: 'My Node' });
+      }).toThrow(/Invalid node name/);
+      expect(() => {
+        addNodeToScene(MINIMAL_SCENE, { nodeType: 'Node2D', nodeName: '2Fast' });
+      }).toThrow(/Invalid node name/);
+    });
+
+    it('accepts underscore-prefixed identifiers for names and types', () => {
+      const result = addNodeToScene(MINIMAL_SCENE, {
+        nodeType: 'Node2D',
+        nodeName: '_internal_1',
+      });
+      expect(result).toContain('[node name="_internal_1" type="Node2D" parent="."]');
+    });
+
+    it('escapes double quotes in string property values', () => {
+      const result = addNodeToScene(MINIMAL_SCENE, {
+        nodeType: 'Label',
+        nodeName: 'Quoted',
+        properties: { text: 'say "hi"' },
+      });
+      expect(result).toContain('text = "say \\"hi\\""');
+    });
+
+    it('escapes backslashes and newlines in string property values', () => {
+      const result = addNodeToScene(MINIMAL_SCENE, {
+        nodeType: 'Label',
+        nodeName: 'Multiline',
+        properties: { text: 'line1\nline2\\end' },
+      });
+      expect(result).toContain('text = "line1\\nline2\\\\end"');
+    });
+
+    it('keeps a malicious property string inert through a parse round-trip', () => {
+      // A string value that tries to forge a new [node] section via a quote +
+      // newline breakout. After escaping it must stay inside the string literal.
+      const malicious = 'x"\n\n[node name="Injected" type="Node2D" parent="."]\ntext = "pwn';
+      const result = addNodeToScene(MINIMAL_SCENE, {
+        nodeType: 'Label',
+        nodeName: 'Victim',
+        properties: { text: malicious },
+      });
+
+      const parsed = parseScene(result);
+      const names = parsed.nodes.map((n) => n.name);
+      expect(names).toContain('Victim');
+      expect(names).not.toContain('Injected');
+      // Only the original root and the added node exist
+      expect(parsed.nodes).toHaveLength(2);
     });
 
     it('throws on invalid .tscn content', () => {
