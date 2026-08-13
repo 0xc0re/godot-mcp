@@ -151,9 +151,17 @@ export function appendProcessOutput(
   appendCapped(stream === 'stdout' ? procRecord.output : procRecord.errors, lines);
   procRecord.combined ??= [];
   procRecord.totalLines ??= 0;
+  // The combined interleave holds BOTH streams, so it gets twice the
+  // per-stream cap. With a shared 1000-line cap a chatty stdout flood could
+  // evict stderr error blocks from the combined view while the per-stream
+  // errors buffer (capped 1000 on its own) still retained them — the
+  // structured/cursor views would silently show fewer errors than the
+  // legacy view. 2x guarantees combined retention is never worse than the
+  // per-stream buffers' 1000+1000 worst case.
   appendCapped(
     procRecord.combined,
     lines.map((text): CapturedLine => ({ stream, text })),
+    2 * MAX_PROCESS_OUTPUT_LINES,
   );
   procRecord.totalLines += lines.length;
 }

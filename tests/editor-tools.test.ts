@@ -727,6 +727,67 @@ describe('Editor MCP Tools', () => {
         expect(parsed.errors).toBeUndefined();
       });
 
+      it('retains error entries through a stdout flood (I-1 regression)', async () => {
+        // Reviewer probe: an early stderr error block followed by a chatty
+        // 1200-line stdout flood must still surface in the structured view
+        // (the per-stream errors buffer retains it; combined must too).
+        const procRecord: GodotProcess = {
+          process: createMockProcess(),
+          output: [],
+          errors: [],
+          combined: [],
+          totalLines: 0,
+        };
+        appendProcessOutput(procRecord, 'stderr', [
+          'ERROR: early failure',
+          '   at: push_error (core/variant/variant_utility.cpp:1023)',
+        ]);
+        appendProcessOutput(
+          procRecord,
+          'stdout',
+          Array.from({ length: 1200 }, (_, i) => `flood ${i}`),
+        );
+        ctx.activeProcess = procRecord;
+
+        const handler = handlers.get('get_debug_output')!;
+        const result = await handler({ format: 'structured' }) as {
+          content: Array<{ text: string }>;
+        };
+        const parsed = JSON.parse(result.content[0].text);
+
+        expect(parsed.entries[0]).toEqual({
+          kind: 'push_error',
+          message: 'early failure',
+          stack: ['at: push_error (core/variant/variant_utility.cpp:1023)'],
+        });
+        expect(parsed.truncated).toBe(false);
+      });
+
+      it('flags truncated: true on a cursorless call once the window has evicted lines', async () => {
+        // Window-start loss must never be silent: a cursorless structured
+        // call implicitly asks for everything, so an overflowed window is
+        // reported even without a since_line cursor.
+        const procRecord: GodotProcess = {
+          process: createMockProcess(),
+          output: ['kept'],
+          errors: [],
+          combined: [{ stream: 'stdout', text: 'kept' }],
+          totalLines: 2500,
+        };
+        ctx.activeProcess = procRecord;
+
+        const handler = handlers.get('get_debug_output')!;
+        const result = await handler({ format: 'structured' }) as {
+          content: Array<{ text: string }>;
+        };
+        const parsed = JSON.parse(result.content[0].text);
+
+        expect(parsed.truncated).toBe(true);
+        expect(parsed.entries).toEqual([{ kind: 'print', message: 'kept' }]);
+        expect(parsed.total_lines).toBe(2500);
+        expect(parsed.next_line).toBe(2500);
+      });
+
       it('combines with since_line to parse only the delta', async () => {
         const procRecord: GodotProcess = {
           process: createMockProcess(),

@@ -84,10 +84,50 @@ describe('appendProcessOutput', () => {
     appendProcessOutput(procRecord, 'stdout', lines);
 
     expect(procRecord.output).toHaveLength(MAX_PROCESS_OUTPUT_LINES);
-    expect(procRecord.combined).toHaveLength(MAX_PROCESS_OUTPUT_LINES);
-    expect(procRecord.combined![0]).toEqual({ stream: 'stdout', text: 'l500' });
+    // combined has a 2x cap (it holds both streams), so 1500 all fit even
+    // though the per-stream buffer already evicted the first 500.
+    expect(procRecord.combined).toHaveLength(1500);
+    expect(procRecord.combined![0]).toEqual({ stream: 'stdout', text: 'l0' });
     // Counter counts ALL lines ever captured, not just the retained window.
     expect(procRecord.totalLines).toBe(1500);
+  });
+
+  it('retains stderr lines in combined through a stdout flood (I-1 regression)', () => {
+    // Reviewer probe: 2 stderr lines followed by a 1200-line stdout flood.
+    // With a shared 1000-line combined cap the stderr lines were evicted
+    // from combined while errors[] still held them; the 2x cap keeps the
+    // combined view at least as retentive as the per-stream buffers.
+    const procRecord = makeRecord();
+    appendProcessOutput(procRecord, 'stderr', [
+      'ERROR: early failure',
+      '   at: push_error (core/variant/variant_utility.cpp:1023)',
+    ]);
+    appendProcessOutput(
+      procRecord,
+      'stdout',
+      Array.from({ length: 1200 }, (_, i) => `flood ${i}`),
+    );
+
+    expect(procRecord.errors).toHaveLength(2);
+    const stderrInCombined = procRecord.combined!.filter((l) => l.stream === 'stderr');
+    expect(stderrInCombined.map((l) => l.text)).toEqual([
+      'ERROR: early failure',
+      '   at: push_error (core/variant/variant_utility.cpp:1023)',
+    ]);
+  });
+
+  it('caps combined at 2x MAX_PROCESS_OUTPUT_LINES (both streams share it)', () => {
+    const procRecord = makeRecord();
+    appendProcessOutput(
+      procRecord,
+      'stdout',
+      Array.from({ length: 2500 }, (_, i) => `l${i}`),
+    );
+
+    expect(procRecord.output).toHaveLength(MAX_PROCESS_OUTPUT_LINES);
+    expect(procRecord.combined).toHaveLength(2 * MAX_PROCESS_OUTPUT_LINES);
+    expect(procRecord.combined![0]).toEqual({ stream: 'stdout', text: 'l500' });
+    expect(procRecord.totalLines).toBe(2500);
   });
 
   it('initializes combined/totalLines on records that lack them', () => {

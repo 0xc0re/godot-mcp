@@ -182,9 +182,10 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
         'Get the current debug output and errors. Optionally pass since_line (the next_line ' +
         'cursor from a previous call) to fetch only new lines, and format: "structured" to get ' +
         'parsed entries (script errors, push_error/push_warning blocks with script/line/stack) ' +
-        'instead of raw text. Output is a bounded window of the most recent 1000 lines; if a ' +
-        'since_line cursor points at lines already evicted from the window, the response sets ' +
-        'truncated: true and returns from the window start.',
+        'instead of raw text. Output is a bounded window of the most recent lines; whenever ' +
+        'requested lines have already been evicted from the window (a since_line cursor older ' +
+        'than the window, or a cursorless structured call on a process that has overflowed the ' +
+        'window), the response sets truncated: true and returns from the window start.',
       inputSchema: {
         since_line: z
           .number()
@@ -235,9 +236,13 @@ export function registerEditorTools(server: McpServer, ctx: ServerContext): void
 
       const { window, total, windowStart } = combinedView(ctx.activeProcess);
 
-      // The cursor points at lines the bounded window has already evicted:
-      // say so explicitly instead of silently returning from the window start.
-      const truncated = since_line !== undefined && since_line < windowStart;
+      // Truncation is flagged whenever lines the caller implicitly asked for
+      // have been evicted by the bounded window: a since_line cursor older
+      // than the window start, or a cursorless call (implicitly "from the
+      // beginning") on a process whose window has already dropped lines.
+      // Never silent — the legacy default path above is the only response
+      // without the flag.
+      const truncated = (since_line ?? 0) < windowStart;
       const start = Math.max(since_line ?? windowStart, windowStart);
       const slice = window.slice(start - windowStart);
 
