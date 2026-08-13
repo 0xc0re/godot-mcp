@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { join, dirname } from 'path';
 import { existsSync, writeFileSync, mkdirSync, readFileSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { executeOperation, validatePath } from '../godot.js';
+import { runOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 
 /**
@@ -132,12 +132,19 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
         let autoloadRegistered = false;
 
         if (register_autoload) {
-          await executeOperation(ctx, project_path, 'modify_project_setting', {
+          const opResult = await runOperation(ctx, project_path, 'modify_project_setting', {
             section: 'autoload',
             key: autoloadName,
             value: '*res://' + script_path,
             action: 'set',
           });
+          if (!opResult.ok) {
+            return toolError(`Failed to register autoload: ${opResult.error}`, [
+              'The script file was written, but autoload registration failed',
+              'Verify the project path is accessible',
+              'Check that Godot is installed and GODOT_PATH is set',
+            ]);
+          }
           autoloadRegistered = true;
         }
 
@@ -319,12 +326,19 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
         let autoloadRegistered = false;
 
         if (register_autoload) {
-          await executeOperation(ctx, project_path as string, 'modify_project_setting', {
+          const opResult = await runOperation(ctx, project_path as string, 'modify_project_setting', {
             section: 'autoload',
             key: resolvedAutoloadName,
             value: '*res://' + (script_path as string),
             action: 'set',
           });
+          if (!opResult.ok) {
+            return toolError(`Failed to register autoload: ${opResult.error}`, [
+              'The script file was written, but autoload registration failed',
+              'Verify the project path is accessible',
+              'Check that Godot is installed and GODOT_PATH is set',
+            ]);
+          }
           autoloadRegistered = true;
         }
 

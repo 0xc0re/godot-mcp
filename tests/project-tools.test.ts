@@ -21,7 +21,7 @@ vi.mock('fs', async () => {
 // Mock godot module
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
-  executeOperation: vi.fn(),
+  runOperation: vi.fn(),
   execGodot: vi.fn(),
 }));
 
@@ -34,7 +34,8 @@ vi.mock('../src/errors.js', () => ({
 }));
 
 import { existsSync, readFileSync } from 'fs';
-import { validatePath, executeOperation } from '../src/godot.js';
+import { validatePath, runOperation } from '../src/godot.js';
+import { toolError } from '../src/errors.js';
 import { registerProjectTools } from '../src/tools/project.js';
 
 // Helper to extract registered tool handlers from McpServer
@@ -160,24 +161,27 @@ describe('Project MCP Tools', () => {
       expect(handlers.has('modify_project_setting')).toBe(true);
     });
 
-    it('passes correct params to executeOperation', async () => {
+    it('passes correct params to runOperation and returns the operation data', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, section: 'application', key: 'config/name', action: 'set' },
         stdout: '{"success": true, "section": "application", "key": "config/name", "action": "set"}',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('modify_project_setting')!;
-      await handler({
+      const result = await handler({
         project_path: '/my/project',
         section: 'application',
         key: 'config/name',
         value: '"New Name"',
         action: 'set',
-      });
+      }) as { content: Array<{ text: string }>; isError?: boolean };
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'modify_project_setting',
@@ -187,6 +191,37 @@ describe('Project MCP Tools', () => {
           value: '"New Name"',
           action: 'set',
         }),
+      );
+      expect(result.isError).toBeUndefined();
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.section).toBe('application');
+      expect(parsed.key).toBe('config/name');
+    });
+
+    it('returns toolError when runOperation yields ok:false', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Missing required parameter: section',
+        stdout: '{"success": false, "error": "Missing required parameter: section"}',
+        stderr: '',
+        exitCode: 0,
+      });
+
+      const handler = handlers.get('modify_project_setting')!;
+      const result = await handler({
+        project_path: '/my/project',
+        section: 'application',
+        key: 'config/name',
+        value: '"New Name"',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Missing required parameter: section'),
+        expect.any(Array),
       );
     });
 

@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { join, basename } from 'path';
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { execGodot, executeOperation, validatePath } from '../godot.js';
+import { execGodot, runOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 import { parseProjectSettings } from '../parsers/project-parser.js';
 
@@ -362,28 +362,23 @@ export function registerProjectTools(server: McpServer, ctx: ServerContext): voi
 
         logDebug(`Modifying project setting: [${section}] ${key}`);
 
-        const { stdout } = await executeOperation(
+        const result = await runOperation(
           ctx,
           project_path,
           'modify_project_setting',
           { section, key, value, action },
         );
 
-        // Parse JSON result from stdout (same pattern as validate_scripts)
-        const lines = stdout.split('\n');
-        const jsonLine = lines.find((l) => l.trim().startsWith('{'));
-        if (jsonLine) {
-          const result = JSON.parse(jsonLine.trim());
-          return {
-            content: [
-              { type: 'text' as const, text: JSON.stringify(result, null, 2) },
-            ],
-          };
+        if (!result.ok) {
+          return toolError(`Failed to modify project setting: ${result.error}`, [
+            'Verify the project path is accessible',
+            'Check that Godot is installed and GODOT_PATH is set',
+          ]);
         }
 
         return {
           content: [
-            { type: 'text' as const, text: stdout.trim() || 'Setting modified successfully' },
+            { type: 'text' as const, text: JSON.stringify(result.data ?? {}, null, 2) },
           ],
         };
       } catch (error: unknown) {

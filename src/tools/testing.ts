@@ -1,9 +1,10 @@
 /**
  * Testing tool domain: run_tests.
  *
- * run_tests uses execGodot directly (NOT executeOperation) since
+ * run_tests uses execGodot directly (NOT runOperation) since
  * GUT test execution is a CLI operation (--headless -s gut_cmdln.gd),
- * not a GDScript script dispatch. Extended 120s timeout for test suites.
+ * not a godot_operations.gd dispatch. Extended 120s timeout for test suites.
+ * There are no runOperation/executeOperation call sites in this module.
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';

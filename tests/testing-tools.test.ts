@@ -2,8 +2,8 @@
  * Tests for testing MCP tools: run_tests.
  *
  * Uses vi.mock() to isolate tool logic from filesystem and Godot process.
- * NOTE: Testing tools use execGodot directly (not executeOperation) since
- * GUT test execution is a CLI operation, not a GDScript dispatch.
+ * NOTE: Testing tools use execGodot directly (not runOperation) since
+ * GUT test execution is a CLI operation, not a godot_operations.gd dispatch.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -19,10 +19,12 @@ vi.mock('fs', async () => {
   };
 });
 
-// Mock godot module — testing tools use execGodot directly, NOT executeOperation
+// Mock godot module — testing tools use execGodot directly, NOT runOperation
+// (runOperation is stubbed for factory completeness; run_tests never calls it)
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
   execGodot: vi.fn(),
+  runOperation: vi.fn(),
 }));
 
 // Mock errors module

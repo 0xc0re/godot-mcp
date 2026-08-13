@@ -23,7 +23,7 @@ vi.mock('fs', async () => {
 // Mock godot module
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
-  executeOperation: vi.fn(),
+  runOperation: vi.fn(),
 }));
 
 // Mock errors module
@@ -35,8 +35,18 @@ vi.mock('../src/errors.js', () => ({
 }));
 
 import { existsSync, writeFileSync, mkdirSync, readFileSync } from 'fs';
-import { validatePath, executeOperation } from '../src/godot.js';
+import { validatePath, runOperation } from '../src/godot.js';
+import { toolError } from '../src/errors.js';
 import { registerScaffoldTools } from '../src/tools/scaffold.js';
+
+/** Success stub for runOperation with a full OperationResult shape. */
+const OP_OK = {
+  ok: true as const,
+  data: { success: true },
+  stdout: '{"success": true}',
+  stderr: '',
+  exitCode: 0,
+};
 
 // Helper to extract registered tool handlers from McpServer
 function getToolHandlers(server: McpServer): Map<string, (params: Record<string, unknown>) => Promise<unknown>> {
@@ -188,7 +198,7 @@ describe('Scaffold MCP Tools', () => {
         register_autoload: false,
       });
 
-      expect(executeOperation).not.toHaveBeenCalled();
+      expect(runOperation).not.toHaveBeenCalled();
     });
 
     it('registers autoload when register_autoload is true', async () => {
@@ -197,7 +207,7 @@ describe('Scaffold MCP Tools', () => {
         if (String(p).endsWith('project.godot')) return true;
         return true;
       });
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue(OP_OK);
 
       const handler = handlers.get('scaffold_event_bus')!;
       await handler({
@@ -207,7 +217,7 @@ describe('Scaffold MCP Tools', () => {
         register_autoload: true,
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'modify_project_setting',
@@ -224,7 +234,7 @@ describe('Scaffold MCP Tools', () => {
         if (String(p).endsWith('project.godot')) return true;
         return true;
       });
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue(OP_OK);
 
       const handler = handlers.get('scaffold_event_bus')!;
       await handler({
@@ -234,7 +244,7 @@ describe('Scaffold MCP Tools', () => {
         register_autoload: true,
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'modify_project_setting',
@@ -250,7 +260,7 @@ describe('Scaffold MCP Tools', () => {
         if (String(p).endsWith('project.godot')) return true;
         return true;
       });
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue(OP_OK);
 
       const handler = handlers.get('scaffold_event_bus')!;
       await handler({
@@ -261,13 +271,39 @@ describe('Scaffold MCP Tools', () => {
         autoload_name: 'MyCustomBus',
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'modify_project_setting',
         expect.objectContaining({
           key: 'MyCustomBus',
         }),
+      );
+    });
+
+    it('returns toolError when autoload registration yields ok:false', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Failed to save project.godot: error code 7',
+        stdout: '{"success": false, "error": "Failed to save project.godot: error code 7"}',
+        stderr: '',
+        exitCode: 0,
+      });
+
+      const handler = handlers.get('scaffold_event_bus')!;
+      const result = await handler({
+        project_path: '/my/project',
+        script_path: 'scripts/event_bus.gd',
+        signals: [{ name: 'player_died', params: [] }],
+        register_autoload: true,
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to save project.godot: error code 7'),
+        expect.any(Array),
       );
     });
 
@@ -363,7 +399,7 @@ describe('Scaffold MCP Tools', () => {
     it('registers autoload when requested', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue(OP_OK);
       const handler = handlers.get('scaffold_config_manager')!;
       await handler({
         project_path: '/my/project',
@@ -373,9 +409,36 @@ describe('Scaffold MCP Tools', () => {
         register_autoload: true,
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx, '/my/project', 'modify_project_setting',
         expect.objectContaining({ section: 'autoload', key: 'ScoreManager' }),
+      );
+    });
+
+    it('returns toolError when autoload registration yields ok:false', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Failed to load project.godot: error code 12',
+        stdout: '{"success": false, "error": "Failed to load project.godot: error code 12"}',
+        stderr: '',
+        exitCode: 0,
+      });
+
+      const handler = handlers.get('scaffold_config_manager')!;
+      const result = await handler({
+        project_path: '/my/project',
+        script_path: 'scripts/autoloads/score_manager.gd',
+        save_path: 'user://scores.cfg',
+        sections: [{ name: 'scores', fields: [{ name: 'best', type: 'int', default: '0' }] }],
+        register_autoload: true,
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to load project.godot: error code 12'),
+        expect.any(Array),
       );
     });
   });

@@ -2,8 +2,8 @@
  * Tests for export MCP tools: export_project, list_export_presets.
  *
  * Uses vi.mock() to isolate tool logic from filesystem and Godot process.
- * NOTE: Export tools use execGodot directly (not executeOperation) since
- * export is a CLI operation, not a GDScript dispatch.
+ * NOTE: Export tools use execGodot directly (not runOperation) since
+ * export is a CLI operation, not a godot_operations.gd dispatch.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -20,10 +20,13 @@ vi.mock('fs', async () => {
   };
 });
 
-// Mock godot module — export tools use execGodot directly, NOT executeOperation
+// Mock godot module — export tools use execGodot directly, NOT runOperation
+// (runOperation is stubbed for factory completeness; the --export-release
+// bespoke path never calls it)
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
   execGodot: vi.fn(),
+  runOperation: vi.fn(),
 }));
 
 // Mock errors module

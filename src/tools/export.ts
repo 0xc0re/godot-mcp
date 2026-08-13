@@ -1,12 +1,15 @@
 /**
  * Export tool domain: export_project, list_export_presets, check_export_readiness.
  *
- * export_project uses execGodot directly (NOT executeOperation) since
+ * export_project uses execGodot directly (NOT runOperation) since
  * Godot export is a CLI operation (--export-release / --export-debug flag),
- * not a GDScript script dispatch. Extended 180s timeout for export builds.
+ * not a godot_operations.gd dispatch. Its bespoke stderr/stdout pattern
+ * failure detection is intentional (Godot exits 0 on export failure).
+ * Extended 180s timeout for export builds.
  *
- * list_export_presets parses export_presets.cfg locally using the
- * same INI parser used for project.godot.
+ * list_export_presets and check_export_readiness parse export_presets.cfg /
+ * project.godot locally using the same INI parser used for project.godot.
+ * There are no runOperation/executeOperation call sites in this module.
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
