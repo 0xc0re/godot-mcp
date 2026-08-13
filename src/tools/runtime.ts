@@ -13,6 +13,7 @@ import { spawn } from 'child_process';
 import type { ServerContext } from '../types.js';
 import { validatePath, trackProcess } from '../godot.js';
 import { toolError } from '../errors.js';
+import { ensureProject } from './common.js';
 
 /** Relative path within project to the trigger file */
 const TRIGGER_PATH_SUFFIX = '.godot/runtime_trigger';
@@ -27,19 +28,26 @@ const POLL_TIMEOUT_MS = 5000;
 const POLL_INTERVAL_MS = 100;
 
 /**
- * Poll for the runtime_helper.gd result file.
+ * Send a command to the runtime_helper.gd autoload and wait for its result.
  *
- * Deletes any stale output file before the caller writes the trigger.
- * After the trigger is written externally, this polls for the output file.
- * On success, reads and parses the JSON, then cleans up both files.
+ * Deletes any stale output file FIRST, then writes the trigger file. This
+ * ordering matters: deleting after the trigger is written races the helper's
+ * response — a leftover result from a previous command could be read as this
+ * command's response, or the fresh response could be deleted before reading.
+ *
+ * After the trigger is written, polls for the output file. On success, reads
+ * and parses the JSON, then cleans up both files.
  */
-async function pollForResult(
+async function triggerAndPoll(
   projectPath: string,
+  command: string,
+  params: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   const outputPath = join(projectPath, OUTPUT_PATH_SUFFIX);
   const triggerPath = join(projectPath, TRIGGER_PATH_SUFFIX);
 
-  // Delete stale output file to prevent reading old results
+  // Delete stale output file BEFORE writing the trigger so an old result
+  // can never be mistaken for (or clobber) this command's response.
   try {
     if (existsSync(outputPath)) {
       unlinkSync(outputPath);
@@ -47,6 +55,9 @@ async function pollForResult(
   } catch {
     // Ignore cleanup errors
   }
+
+  // Write the trigger file to request the command
+  writeFileSync(triggerPath, JSON.stringify({ command, params }));
 
   // Poll for the response file
   const startTime = Date.now();
@@ -115,16 +126,8 @@ export function registerRuntimeTools(server: McpServer, ctx: ServerContext): voi
         ]);
       }
 
-      const triggerPath = join(project_path, TRIGGER_PATH_SUFFIX);
-
       try {
-        // Write trigger file
-        writeFileSync(
-          triggerPath,
-          JSON.stringify({ command: 'scene_tree', params: {} }),
-        );
-
-        const result = await pollForResult(project_path);
+        const result = await triggerAndPoll(project_path, 'scene_tree', {});
 
         return {
           content: [
@@ -183,18 +186,10 @@ export function registerRuntimeTools(server: McpServer, ctx: ServerContext): voi
         ]);
       }
 
-      const triggerPath = join(project_path, TRIGGER_PATH_SUFFIX);
-
       try {
-        writeFileSync(
-          triggerPath,
-          JSON.stringify({
-            command: 'inspect_node',
-            params: { node_path },
-          }),
-        );
-
-        const result = await pollForResult(project_path);
+        const result = await triggerAndPoll(project_path, 'inspect_node', {
+          node_path,
+        });
 
         return {
           content: [
@@ -253,18 +248,10 @@ export function registerRuntimeTools(server: McpServer, ctx: ServerContext): voi
         ]);
       }
 
-      const triggerPath = join(project_path, TRIGGER_PATH_SUFFIX);
-
       try {
-        writeFileSync(
-          triggerPath,
-          JSON.stringify({
-            command: 'get_group',
-            params: { group },
-          }),
-        );
-
-        const result = await pollForResult(project_path);
+        const result = await triggerAndPoll(project_path, 'get_group', {
+          group,
+        });
 
         return {
           content: [
@@ -310,10 +297,9 @@ export function registerRuntimeTools(server: McpServer, ctx: ServerContext): voi
       },
     },
     async ({ project_path, scene }) => {
-      if (!validatePath(project_path)) {
-        return toolError('Invalid project path', [
-          'Provide a valid path without ".." or other potentially unsafe characters',
-        ]);
+      const projectError = ensureProject(project_path);
+      if (projectError) {
+        return projectError;
       }
 
       if (!ctx.activeProcess) {
@@ -322,70 +308,94 @@ export function registerRuntimeTools(server: McpServer, ctx: ServerContext): voi
         ]);
       }
 
-      // Kill existing process
-      ctx.activeProcess.process.kill();
+      try {
+        // Kill existing process
+        ctx.activeProcess.process.kill();
 
-      // Wait for exit with 3s timeout
-      await new Promise<void>((resolve) => {
-        const proc = ctx.activeProcess!.process;
-        proc.once('exit', () => resolve());
-        setTimeout(() => resolve(), 3000);
-      });
+        // Wait for exit with 3s timeout
+        await new Promise<void>((resolve) => {
+          const proc = ctx.activeProcess!.process;
+          proc.once('exit', () => resolve());
+          setTimeout(() => resolve(), 3000);
+        });
 
-      // Clear old process state
-      ctx.activeProcess = null;
+        // Clear old process state
+        ctx.activeProcess = null;
 
-      // Build args for new process
-      const args = ['-d', '--path', project_path];
-      if (scene && validatePath(scene)) {
-        args.push(scene);
+        // Build args for new process
+        const args = ['-d', '--path', project_path];
+        if (scene && validatePath(scene)) {
+          args.push(scene);
+        }
+
+        // Spawn new process
+        const proc = trackProcess(
+          ctx,
+          spawn(ctx.godotPath, args, { stdio: 'pipe' }),
+        );
+        const output: string[] = [];
+        const errors: string[] = [];
+
+        proc.stdout?.on('data', (data: Buffer) => {
+          const lines = data.toString().split('\n');
+          output.push(...lines);
+        });
+
+        proc.stderr?.on('data', (data: Buffer) => {
+          const lines = data.toString().split('\n');
+          errors.push(...lines);
+        });
+
+        // Mirror run_project: clear activeProcess when the process dies so
+        // later tools don't act on a dead handle.
+        proc.on('exit', () => {
+          if (ctx.activeProcess && ctx.activeProcess.process === proc) {
+            ctx.activeProcess = null;
+          }
+        });
+
+        proc.on('error', (err: Error) => {
+          console.error('Failed to start Godot process:', err);
+          if (ctx.activeProcess && ctx.activeProcess.process === proc) {
+            ctx.activeProcess = null;
+          }
+        });
+
+        ctx.activeProcess = { process: proc, output, errors };
+
+        // Wait for first stdout data with 5s timeout (confirms engine is running)
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(() => resolve(), 5000);
+          proc.stdout?.once('data', () => {
+            clearTimeout(timer);
+            resolve();
+          });
+          proc.once('error', () => {
+            clearTimeout(timer);
+            resolve();
+          });
+        });
+
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify({
+                message: 'Project restarted successfully',
+                pid: proc.pid,
+                running: !proc.killed,
+              }),
+            },
+          ],
+        };
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        return toolError(`Failed to restart Godot project: ${errorMessage}`, [
+          'Ensure Godot is installed correctly',
+          'Check if the GODOT_PATH environment variable is set correctly',
+          'Verify the project path is accessible',
+        ]);
       }
-
-      // Spawn new process
-      const proc = trackProcess(
-        ctx,
-        spawn(ctx.godotPath, args, { stdio: 'pipe' }),
-      );
-      const output: string[] = [];
-      const errors: string[] = [];
-
-      proc.stdout?.on('data', (data: Buffer) => {
-        const lines = data.toString().split('\n');
-        output.push(...lines);
-      });
-
-      proc.stderr?.on('data', (data: Buffer) => {
-        const lines = data.toString().split('\n');
-        errors.push(...lines);
-      });
-
-      ctx.activeProcess = { process: proc, output, errors };
-
-      // Wait for first stdout data with 5s timeout (confirms engine is running)
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(() => resolve(), 5000);
-        proc.stdout?.once('data', () => {
-          clearTimeout(timer);
-          resolve();
-        });
-        proc.once('error', () => {
-          clearTimeout(timer);
-          resolve();
-        });
-      });
-
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify({
-              message: 'Project restarted successfully',
-              pid: proc.pid,
-              running: !proc.killed,
-            }),
-          },
-        ],
-      };
     },
   );
 }

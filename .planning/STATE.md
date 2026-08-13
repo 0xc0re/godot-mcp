@@ -71,7 +71,7 @@ Recent:
 - 08-01: File-polling IPC reuses screenshot_helper.gd pattern -- no new protocols or dependencies
 - 08-01: runtime_helper.gd filters properties by PROPERTY_USAGE_STORAGE, skips underscore-prefixed
 - 08-01: Non-JSON-serializable Godot types converted via var_to_str() (Vector2, Color, NodePath, etc.)
-- 08-01: pollForResult deletes stale output before trigger write (race condition prevention)
+- 08-01: triggerAndPoll deletes stale output, THEN writes the trigger (race condition prevention). Corrected 08-12: the original pollForResult implementation actually ran the stale-output delete AFTER the caller wrote the trigger, racing the helper's response; v2.1-hardening replaced it with triggerAndPoll which enforces the delete-then-trigger ordering this entry always claimed.
 - 07-03: paint_tilemap uses mode-based parameter dispatch (paint=cells, fill=region bounds, clear=optional cells)
 - 07-03: Optional numeric params apply defaults via ?? operator in handler body for test compatibility
 - 07-03: Phase 7 registration placed after Phase 6 tools in index.ts maintaining phase ordering

@@ -203,6 +203,49 @@ describe('inspect_scene_tree', () => {
     expect(parsed.type).toBe('Node3D');
   });
 
+  it('deletes stale output before writing the trigger so old results are never read', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+
+    // Record the interleaving of fs calls to verify ordering
+    const events: string[] = [];
+    // A stale result file from a previous command is already on disk
+    vi.mocked(existsSync).mockImplementation((path: string | unknown) => {
+      return String(path).endsWith('runtime_result.json');
+    });
+    vi.mocked(unlinkSync).mockImplementation((path) => {
+      events.push(`unlink:${String(path)}`);
+    });
+    vi.mocked(writeFileSync).mockImplementation((path) => {
+      events.push(`write:${String(path)}`);
+    });
+    vi.mocked(readFileSync).mockReturnValue(JSON.stringify({ name: 'fresh' }));
+
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    const handler = handlers.get('inspect_scene_tree')!;
+    const resultPromise = handler({ project_path: '/my/project' });
+    await vi.advanceTimersByTimeAsync(200);
+    const result = (await resultPromise) as {
+      content: Array<{ type: string; text?: string }>;
+    };
+
+    const staleDelete = events.findIndex(
+      (e) => e.startsWith('unlink:') && e.includes('runtime_result.json'),
+    );
+    const triggerWrite = events.findIndex(
+      (e) => e.startsWith('write:') && e.includes('runtime_trigger'),
+    );
+    expect(staleDelete).toBeGreaterThanOrEqual(0);
+    expect(triggerWrite).toBeGreaterThanOrEqual(0);
+    // The stale output must be deleted BEFORE the trigger is written —
+    // deleting after the trigger races the helper's fresh response.
+    expect(staleDelete).toBeLessThan(triggerWrite);
+
+    // And the fresh (post-trigger) result is what gets returned
+    const parsed = JSON.parse(result.content[0].text!);
+    expect(parsed.name).toBe('fresh');
+  });
+
   it('cleans up trigger and output files after success', async () => {
     vi.mocked(validatePath).mockReturnValue(true);
     vi.mocked(writeFileSync).mockReturnValue(undefined);
@@ -467,6 +510,7 @@ describe('restart_project', () => {
 
   it('returns error when no active process', async () => {
     vi.mocked(validatePath).mockReturnValue(true);
+    vi.mocked(existsSync).mockReturnValue(true);
     ctx.activeProcess = null;
 
     const handler = handlers.get('restart_project')!;
@@ -488,8 +532,54 @@ describe('restart_project', () => {
     expect(result.isError).toBe(true);
   });
 
+  it('returns error when project.godot is missing', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    vi.mocked(existsSync).mockReturnValue(false);
+    ctx.activeProcess = { process: createMockProcess(), output: [], errors: [] };
+
+    const handler = handlers.get('restart_project')!;
+    const result = (await handler({ project_path: '/not/a/project' })) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining('Not a valid Godot project'),
+      expect.any(Array),
+    );
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('returns toolError when spawn throws instead of leaking the exception', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    vi.mocked(existsSync).mockReturnValue(true);
+
+    const oldProcess = createMockProcess();
+    vi.mocked(oldProcess.once).mockImplementation(((event: string, cb: () => void) => {
+      if (event === 'exit') {
+        setTimeout(() => cb(), 0);
+      }
+      return oldProcess;
+    }) as typeof oldProcess.once);
+    ctx.activeProcess = { process: oldProcess, output: [], errors: [] };
+
+    vi.mocked(spawn).mockImplementation(() => {
+      throw new Error('spawn ENOENT');
+    });
+
+    const handler = handlers.get('restart_project')!;
+    const resultPromise = handler({ project_path: '/my/project' });
+    await vi.advanceTimersByTimeAsync(100);
+    const result = (await resultPromise) as { isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(toolError).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to restart Godot project'),
+      expect.any(Array),
+    );
+  });
+
   it('kills existing process and spawns new one', async () => {
     vi.mocked(validatePath).mockReturnValue(true);
+    vi.mocked(existsSync).mockReturnValue(true);
 
     // Set up old mock process that exits immediately when killed
     const oldProcess = createMockProcess();
@@ -554,8 +644,67 @@ describe('restart_project', () => {
     expect(parsed.running).toBe(true);
   });
 
+  it('registers exit/error handlers that clear ctx.activeProcess for the new process', async () => {
+    vi.mocked(validatePath).mockReturnValue(true);
+    vi.mocked(existsSync).mockReturnValue(true);
+
+    const oldProcess = createMockProcess();
+    vi.mocked(oldProcess.once).mockImplementation(((event: string, cb: () => void) => {
+      if (event === 'exit') {
+        setTimeout(() => cb(), 0);
+      }
+      return oldProcess;
+    }) as typeof oldProcess.once);
+    ctx.activeProcess = { process: oldProcess, output: [], errors: [] };
+
+    const newProcess = {
+      pid: 4321,
+      killed: false,
+      stdout: {
+        on: vi.fn(),
+        once: vi.fn((event: string, cb: (data: Buffer) => void) => {
+          if (event === 'data') {
+            setTimeout(() => cb(Buffer.from('Godot Engine v4.3')), 0);
+          }
+          return newProcess.stdout;
+        }),
+      },
+      stderr: { on: vi.fn() },
+      on: vi.fn(),
+      once: vi.fn((_event: string, _cb: () => void) => newProcess),
+    } as unknown as ChildProcess;
+
+    vi.mocked(spawn).mockReturnValue(newProcess);
+
+    const handler = handlers.get('restart_project')!;
+    const resultPromise = handler({ project_path: '/my/project' });
+    await vi.advanceTimersByTimeAsync(100);
+    await resultPromise;
+
+    expect(ctx.activeProcess).not.toBeNull();
+
+    // Find the registered exit handler and fire it — activeProcess must clear
+    const onCalls = vi.mocked(newProcess.on).mock.calls;
+    const exitHandler = onCalls.find(([event]) => event === 'exit')?.[1] as
+      | ((code: number | null) => void)
+      | undefined;
+    expect(exitHandler).toBeDefined();
+    exitHandler!(0);
+    expect(ctx.activeProcess).toBeNull();
+
+    // Restore state and fire the error handler — same clearing behavior
+    ctx.activeProcess = { process: newProcess, output: [], errors: [] };
+    const errorHandler = onCalls.find(([event]) => event === 'error')?.[1] as
+      | ((err: Error) => void)
+      | undefined;
+    expect(errorHandler).toBeDefined();
+    errorHandler!(new Error('crashed'));
+    expect(ctx.activeProcess).toBeNull();
+  });
+
   it('includes scene parameter when provided', async () => {
     vi.mocked(validatePath).mockReturnValue(true);
+    vi.mocked(existsSync).mockReturnValue(true);
 
     // Old process
     const oldProcess = createMockProcess();
@@ -606,6 +755,7 @@ describe('restart_project', () => {
 
   it('confirms running by waiting for stdout output', async () => {
     vi.mocked(validatePath).mockReturnValue(true);
+    vi.mocked(existsSync).mockReturnValue(true);
 
     // Old process
     const oldProcess = createMockProcess();

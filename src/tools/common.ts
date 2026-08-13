@@ -1,8 +1,9 @@
 /**
  * Shared preamble helpers for tool handlers.
  *
- * Not yet imported anywhere — later tasks will collapse the ~54 duplicated
- * "validate project path + check project.godot exists" preambles onto this.
+ * Currently used by restart_project (runtime.ts); later tasks will collapse
+ * the remaining ~54 duplicated "validate project path + check project.godot
+ * exists" preambles onto this.
  */
 
 import { existsSync } from 'fs';
