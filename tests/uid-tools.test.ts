@@ -262,6 +262,63 @@ describe('UID MCP Tools', () => {
       expect(runOperation).not.toHaveBeenCalled();
     });
 
+    it('returns toolError when the op reports success but scenes failed to resave (ledgered)', async () => {
+      // resave_resources prints {"success": true, ...} unconditionally and only
+      // counts per-scene failures in scenes_errors — success must be gated on it.
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(execGodot).mockResolvedValue({ stdout: '4.4.stable', stderr: '' });
+      vi.mocked(isGodot44OrLater).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: {
+          success: true,
+          scenes_processed: 5,
+          scenes_saved: 3,
+          scenes_errors: 2,
+          scripts_missing_uids: 0,
+          uids_generated: 0,
+        },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
+
+      const handler = handlers.get('update_project_uids')!;
+      const result = (await handler({
+        project_path: '/proj',
+      })) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('2 scene(s) failed to resave'),
+        expect.any(Array),
+      );
+    });
+
+    it('reports success when the op verdict shows zero scene errors', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(execGodot).mockResolvedValue({ stdout: '4.4.stable', stderr: '' });
+      vi.mocked(isGodot44OrLater).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, scenes_processed: 5, scenes_saved: 5, scenes_errors: 0 },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
+
+      const handler = handlers.get('update_project_uids')!;
+      const result = (await handler({
+        project_path: '/proj',
+      })) as { isError?: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toContain('Project UIDs updated successfully');
+      expect(result.content[0].text).toContain('"scenes_errors": 0');
+    });
+
     it('returns toolError when project.godot is missing', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(false);

@@ -122,6 +122,22 @@ export function registerUidTools(server: McpServer, ctx: ServerContext): void {
           ]);
         }
 
+        // The resave_resources op prints {"success": true, ...} unconditionally,
+        // even when individual scenes failed to load or save — it only counts
+        // those failures in scenes_errors (ledgered v2.1 handoff note). Gate
+        // success on the actual per-scene verdict.
+        const data = result.data as { scenes_errors?: number } | undefined;
+        if (typeof data?.scenes_errors === 'number' && data.scenes_errors > 0) {
+          return toolError(
+            `Failed to update project UIDs: ${data.scenes_errors} scene(s) failed to resave`,
+            [
+              'Check the Godot output for scenes that failed to load or save',
+              'Ensure you have write permissions to the project directory',
+              'Fix or remove corrupted scene files, then retry',
+            ],
+          );
+        }
+
         return opSuccess('Project UIDs updated successfully.', result.data);
       },
     ),

@@ -52,10 +52,18 @@ interface ValidateScriptsSummary {
 }
 
 function isValidateScriptsSummary(candidate: unknown): candidate is ValidateScriptsSummary {
+  if (typeof candidate !== 'object' || candidate === null) {
+    return false;
+  }
+  // Check the counters as well as the array key: a partial match (e.g. a
+  // stray {"results": []} debug line) would otherwise render
+  // "Validated undefined files" (ledgered T4 guard hardening).
+  const summary = candidate as Partial<ValidateScriptsSummary>;
   return (
-    typeof candidate === 'object' &&
-    candidate !== null &&
-    Array.isArray((candidate as ValidateScriptsSummary).results)
+    Array.isArray(summary.results) &&
+    typeof summary.total === 'number' &&
+    typeof summary.errors === 'number' &&
+    typeof summary.valid === 'number'
   );
 }
 
@@ -71,10 +79,36 @@ interface ListScriptsSummary {
 }
 
 function isListScriptsSummary(candidate: unknown): candidate is ListScriptsSummary {
+  if (typeof candidate !== 'object' || candidate === null) {
+    return false;
+  }
+  // Require the count too, so a partial match can't render "Found undefined
+  // scripts" (ledgered T4 guard hardening).
+  const summary = candidate as Partial<ListScriptsSummary>;
+  return Array.isArray(summary.scripts) && typeof summary.total === 'number';
+}
+
+/**
+ * Bare class-info JSON printed by the query_class op (no success envelope).
+ */
+interface ClassInfoSummary {
+  class_name: string;
+  parent_class?: string;
+  properties: unknown[];
+  methods: unknown[];
+  signals: unknown[];
+}
+
+function isClassInfoSummary(candidate: unknown): candidate is ClassInfoSummary {
+  if (typeof candidate !== 'object' || candidate === null) {
+    return false;
+  }
+  const summary = candidate as Partial<ClassInfoSummary>;
   return (
-    typeof candidate === 'object' &&
-    candidate !== null &&
-    Array.isArray((candidate as ListScriptsSummary).scripts)
+    typeof summary.class_name === 'string' &&
+    Array.isArray(summary.properties) &&
+    Array.isArray(summary.methods) &&
+    Array.isArray(summary.signals)
   );
 }
 
@@ -247,26 +281,28 @@ export function registerScriptTools(server: McpServer, ctx: ServerContext): void
 
         const result = await runOperation(ctx, project_path, 'query_class', params);
 
-        if (!result.ok) {
-          return toolError(`Failed to query class: ${result.error}`, [
-            'Check that the class name is spelled correctly',
-            'Use a built-in Godot class name like Node2D, CharacterBody3D, etc.',
-          ]);
-        }
+        // query_class's success path doesn't emit a success envelope — it prints
+        // bare class-info JSON to stdout. NOTE: a broken script in the project
+        // makes the Godot engine itself write `ERROR: ...` lines to stderr even
+        // though the query completes and prints valid class JSON (exit 0), which
+        // trips the tier-3 stderr-marker verdict and flips result.ok to false.
+        // Apply the same recover-before-error pattern as validate_scripts /
+        // list_scripts: a recovered class JSON always wins over the ok:false
+        // verdict; only fail hard when no class JSON was produced (T4 deferred).
+        const parsed = findSummaryJson(result.stdout, isClassInfoSummary);
 
-        // query_class's success path doesn't emit a success envelope, so parse the
-        // JSON line out of stdout directly rather than relying on result.data.
-        const lines = result.stdout.split('\n');
-        const jsonLine = lines.find((line) => line.trim().startsWith('{'));
-
-        if (!jsonLine) {
+        if (!parsed) {
+          if (!result.ok) {
+            return toolError(`Failed to query class: ${result.error}`, [
+              'Check that the class name is spelled correctly',
+              'Use a built-in Godot class name like Node2D, CharacterBody3D, etc.',
+            ]);
+          }
           return toolError('Failed to parse class info from Godot output', [
             'Godot may have encountered an error during class query',
             result.stderr ? `Stderr: ${result.stderr}` : 'No stderr output',
           ]);
         }
-
-        const parsed = JSON.parse(jsonLine) as Record<string, unknown>;
 
         return textResult(JSON.stringify(parsed, null, 2));
       },

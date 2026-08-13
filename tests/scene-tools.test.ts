@@ -313,6 +313,27 @@ describe('Scene MCP Tools', () => {
       expect(result.content[0].text).toContain('scenes/new.tscn');
     });
 
+    it('renders "Output: {}" (not "Output: undefined") when ok:true has no data (ledgered)', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
+
+      const handler = handlers.get('create_scene')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/new.tscn',
+      }) as { content: Array<{ type: string; text: string }>; isError?: boolean };
+
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toContain('Output: {}');
+      expect(result.content[0].text).not.toContain('undefined');
+    });
+
     it('returns toolError when runOperation yields ok:false', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);

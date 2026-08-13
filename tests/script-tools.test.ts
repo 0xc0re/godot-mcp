@@ -465,5 +465,124 @@ describe('Script MCP Tools', () => {
 
       expect(result.isError).toBe(true);
     });
+
+    it('returns the class info when ok:false but stdout contains valid class JSON (broken script in project)', async () => {
+      // A broken project script makes the engine write ERROR lines to stderr,
+      // tripping the tier-3 verdict even though the class query succeeded.
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'ERROR: Failed to load script "res://broken.gd" with error "Parse error".',
+        stdout: '{"class_name":"Node2D","parent_class":"CanvasItem","properties":[],"methods":[],"signals":[]}',
+        stderr: 'ERROR: Failed to load script "res://broken.gd" with error "Parse error".',
+        exitCode: 0,
+      });
+
+      const handler = handlers.get('query_class')!;
+      const result = await handler({
+        project_path: '/my/project',
+        class_name: 'Node2D',
+      }) as { isError?: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBeFalsy();
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.class_name).toBe('Node2D');
+    });
+
+    it('does not mistake a failure envelope or partial JSON for class info', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Class does not exist: BogusClass',
+        stdout: '{"success":false,"error":"Class does not exist: BogusClass"}',
+        stderr: '',
+        exitCode: 0,
+      });
+
+      const handler = handlers.get('query_class')!;
+      const result = await handler({
+        project_path: '/my/project',
+        class_name: 'BogusClass',
+      }) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Class does not exist: BogusClass'),
+        expect.any(Array),
+      );
+    });
+  });
+
+  // ── findSummaryJson guard hardening (ledgered T4) ────────────────────
+
+  describe('summary guard hardening', () => {
+    beforeEach(() => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+    });
+
+    it('validate_scripts rejects a partial summary missing counters (no "Validated undefined files")', async () => {
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        stdout: '{"results": []}',
+        stderr: '',
+        exitCode: 0,
+      });
+
+      const handler = handlers.get('validate_scripts')!;
+      const result = await handler({
+        project_path: '/my/project',
+      }) as { isError?: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).not.toContain('undefined');
+      expect(toolError).toHaveBeenCalledWith(
+        'Failed to parse validation results from Godot output',
+        expect.any(Array),
+      );
+    });
+
+    it('list_scripts rejects a partial summary missing total (no "Found undefined scripts")', async () => {
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        stdout: '{"scripts": []}',
+        stderr: '',
+        exitCode: 0,
+      });
+
+      const handler = handlers.get('list_scripts')!;
+      const result = await handler({
+        project_path: '/my/project',
+      }) as { isError?: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).not.toContain('undefined');
+      expect(toolError).toHaveBeenCalledWith(
+        'Failed to parse script list from Godot output',
+        expect.any(Array),
+      );
+    });
+
+    it('validate_scripts skips a partial JSON line and finds the real summary above it', async () => {
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        stdout: [
+          '{"results": [{"file": "res://a.gd", "valid": true}], "total": 1, "errors": 0, "valid": 1}',
+          '{"results": []}',
+        ].join('\n'),
+        stderr: '',
+        exitCode: 0,
+      });
+
+      const handler = handlers.get('validate_scripts')!;
+      const result = await handler({
+        project_path: '/my/project',
+      }) as { isError?: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBeFalsy();
+      expect(result.content[0].text).toContain('Validated 1 files: 1 valid, 0 errors');
+    });
   });
 });
