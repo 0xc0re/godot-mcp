@@ -27,10 +27,14 @@
     "build"
   ],
   "scripts": {
-    "build": "tsc && node scripts/build.js",
+    "build": "tsc -p tsconfig.build.json && node scripts/build.js",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js",
     "prepare": "npm run build",
-    "watch": "tsc --watch"
+    "start": "./start.sh",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "watch": "tsc --watch -p tsconfig.build.json"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",

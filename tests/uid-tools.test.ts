@@ -54,7 +54,11 @@ function getToolHandlers(
 
   server.registerTool = function (name: string, _config: unknown, handler: unknown) {
     handlers.set(name, handler as (params: Record<string, unknown>) => Promise<unknown>);
-    return originalRegisterTool(name, _config, handler);
+    return originalRegisterTool(
+      name,
+      _config as Parameters<typeof originalRegisterTool>[1],
+      handler as Parameters<typeof originalRegisterTool>[2],
+    );
   } as typeof server.registerTool;
 
   return handlers;
@@ -99,6 +103,9 @@ describe('UID MCP Tools', () => {
       vi.mocked(runOperation).mockResolvedValue({
         ok: true,
         data: { exists: true, uid: 'uid://abc123' },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('get_uid')!;

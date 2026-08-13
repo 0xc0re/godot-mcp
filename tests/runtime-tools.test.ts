@@ -59,7 +59,11 @@ function getToolHandlers(
 
   server.registerTool = function (name: string, _config: unknown, handler: unknown) {
     handlers.set(name, handler as (params: Record<string, unknown>) => Promise<unknown>);
-    return originalRegisterTool(name, _config, handler);
+    return originalRegisterTool(
+      name,
+      _config as Parameters<typeof originalRegisterTool>[1],
+      handler as Parameters<typeof originalRegisterTool>[2],
+    );
   } as typeof server.registerTool;
 
   return handlers;
@@ -684,7 +688,10 @@ describe('restart_project', () => {
     expect(ctx.activeProcess).not.toBeNull();
 
     // Find the registered exit handler and fire it — activeProcess must clear
-    const onCalls = vi.mocked(newProcess.on).mock.calls;
+    // (cast: ChildProcess.on's overloads collapse the tuple type to one event)
+    const onCalls = vi.mocked(newProcess.on).mock.calls as unknown as Array<
+      [string, (...args: unknown[]) => void]
+    >;
     const exitHandler = onCalls.find(([event]) => event === 'exit')?.[1] as
       | ((code: number | null) => void)
       | undefined;

@@ -64,7 +64,7 @@ describe('MCP Resource Registration', () => {
 
     // Find scene registration call
     const sceneCall = registerResourceSpy.mock.calls.find(
-      (call) => call[0] === 'godot-scene',
+      (call: unknown[]) => call[0] === 'godot-scene',
     );
     expect(sceneCall).toBeDefined();
     expect(sceneCall![1]).toBeInstanceOf(ResourceTemplate);
@@ -75,7 +75,7 @@ describe('MCP Resource Registration', () => {
 
     // Find script registration call
     const scriptCall = registerResourceSpy.mock.calls.find(
-      (call) => call[0] === 'godot-script',
+      (call: unknown[]) => call[0] === 'godot-script',
     );
     expect(scriptCall).toBeDefined();
     expect(scriptCall![1]).toBeInstanceOf(ResourceTemplate);
@@ -116,7 +116,7 @@ describe('MCP Resource Registration', () => {
 
     // Extract the list callback from the ResourceTemplate
     const sceneCall = registerResourceSpy.mock.calls.find(
-      (call) => call[0] === 'godot-scene',
+      (call: unknown[]) => call[0] === 'godot-scene',
     );
     const template = sceneCall![1] as ResourceTemplate;
     const listResult = await template.listCallback!({} as never);
@@ -163,7 +163,7 @@ describe('MCP Resource Registration', () => {
     registerGodotResources(server, ctx);
 
     const scriptCall = registerResourceSpy.mock.calls.find(
-      (call) => call[0] === 'godot-script',
+      (call: unknown[]) => call[0] === 'godot-script',
     );
     const template = scriptCall![1] as ResourceTemplate;
     const listResult = await template.listCallback!({} as never);
@@ -189,7 +189,7 @@ describe('MCP Resource Registration', () => {
     registerGodotResources(server, ctx);
 
     const sceneCall = registerResourceSpy.mock.calls.find(
-      (call) => call[0] === 'godot-scene',
+      (call: unknown[]) => call[0] === 'godot-scene',
     );
     // The read callback is the 4th argument
     const readCallback = sceneCall![3] as (uri: URL, variables: Record<string, string>, extra: unknown) => Promise<{ contents: Array<{ uri: string; text: string }> }>;
@@ -217,7 +217,7 @@ describe('MCP Resource Registration', () => {
     registerGodotResources(server, ctx);
 
     const scriptCall = registerResourceSpy.mock.calls.find(
-      (call) => call[0] === 'godot-script',
+      (call: unknown[]) => call[0] === 'godot-script',
     );
     const readCallback = scriptCall![3] as (uri: URL, variables: Record<string, string>, extra: unknown) => Promise<{ contents: Array<{ uri: string; text: string }> }>;
 
@@ -244,7 +244,7 @@ describe('MCP Resource Registration', () => {
     registerGodotResources(server, ctx);
 
     const sceneCall = registerResourceSpy.mock.calls.find(
-      (call) => call[0] === 'godot-scene',
+      (call: unknown[]) => call[0] === 'godot-scene',
     );
     const readCallback = sceneCall![3] as (uri: URL, variables: Record<string, string>, extra: unknown) => Promise<unknown>;
 
@@ -270,7 +270,7 @@ describe('MCP Resource Registration', () => {
     registerGodotResources(server, ctx);
 
     const scriptCall = registerResourceSpy.mock.calls.find(
-      (call) => call[0] === 'godot-script',
+      (call: unknown[]) => call[0] === 'godot-script',
     );
     const readCallback = scriptCall![3] as (uri: URL, variables: Record<string, string>, extra: unknown) => Promise<unknown>;
 
@@ -297,7 +297,7 @@ describe('MCP Resource Registration', () => {
     registerGodotResources(server, ctx);
 
     const sceneCall = registerResourceSpy.mock.calls.find(
-      (call) => call[0] === 'godot-scene',
+      (call: unknown[]) => call[0] === 'godot-scene',
     );
     const readCallback = sceneCall![3] as (uri: URL, variables: Record<string, string>, extra: unknown) => Promise<unknown>;
 
@@ -323,7 +323,7 @@ describe('MCP Resource Registration', () => {
     registerGodotResources(server, ctx);
 
     const sceneCall = registerResourceSpy.mock.calls.find(
-      (call) => call[0] === 'godot-scene',
+      (call: unknown[]) => call[0] === 'godot-scene',
     );
     const readCallback = sceneCall![3] as (uri: URL, variables: Record<string, string>, extra: unknown) => Promise<unknown>;
 
@@ -350,7 +350,7 @@ describe('MCP Resource Registration', () => {
 
     // Scene list should be empty
     const sceneCall = registerResourceSpy.mock.calls.find(
-      (call) => call[0] === 'godot-scene',
+      (call: unknown[]) => call[0] === 'godot-scene',
     );
     const sceneTemplate = sceneCall![1] as ResourceTemplate;
     const sceneList = await sceneTemplate.listCallback!({} as never);
@@ -358,7 +358,7 @@ describe('MCP Resource Registration', () => {
 
     // Script list should be empty
     const scriptCall = registerResourceSpy.mock.calls.find(
-      (call) => call[0] === 'godot-script',
+      (call: unknown[]) => call[0] === 'godot-script',
     );
     const scriptTemplate = scriptCall![1] as ResourceTemplate;
     const scriptList = await scriptTemplate.listCallback!({} as never);
