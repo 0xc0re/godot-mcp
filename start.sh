@@ -3,8 +3,11 @@ set -e
 
 cd "$(dirname "$0")"
 
-# Kill any existing godot-mcp process
-EXISTING_PID=$(pgrep -f "node build/index.js" 2>/dev/null || true)
+# Kill any existing godot-mcp process. Match the absolute script path so we
+# only ever kill THIS checkout's server -- a bare "node build/index.js"
+# pattern would match any such process machine-wide.
+SERVER_PATH="$(pwd)/build/index.js"
+EXISTING_PID=$(pgrep -f "node $SERVER_PATH" 2>/dev/null || true)
 if [ -n "$EXISTING_PID" ]; then
   echo "Killing existing godot-mcp process (PID: $EXISTING_PID)..."
   kill $EXISTING_PID 2>/dev/null || true
