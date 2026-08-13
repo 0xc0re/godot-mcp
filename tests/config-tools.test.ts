@@ -997,6 +997,53 @@ describe('Config MCP Tools', () => {
       expect(parsed.results).toHaveLength(2);
     });
 
+    it('marks properties as failed when runOperation yields ok:false', async () => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('file content');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          layer_names: {
+            '3d_physics/layer_1': '"Player"',
+            '3d_physics/layer_2': '"Environment"',
+          },
+        },
+        configVersion: 5,
+      });
+      vi.mocked(runOperation)
+        .mockResolvedValueOnce({
+          ok: true,
+          data: { success: true },
+          stdout: '',
+          stderr: '',
+          exitCode: 0,
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          error: 'Failed to load scene: res://scenes/player.tscn',
+          stdout: '',
+          stderr: '',
+          exitCode: 1,
+        });
+
+      const handler = handlers.get('set_node_collision')!;
+      const result = await handler({
+        project_path: '/my/project',
+        scene_path: 'scenes/player.tscn',
+        node_path: '.',
+        collision_layer: ['Player'],
+        collision_mask: ['Environment'],
+        physics_type: '3d',
+      }) as { content: Array<{ text: string }> };
+
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.success).toBe(false);
+      expect(parsed.results).toEqual([
+        { property: 'collision_layer', bitmask: 1, success: true },
+        { property: 'collision_mask', bitmask: 2, success: false },
+      ]);
+    });
+
     it('returns toolError when runOperation rejects unexpectedly', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
