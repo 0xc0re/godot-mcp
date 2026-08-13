@@ -658,9 +658,16 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           ]);
         }
 
-        // Build the autoload value: *res://path for enabled, res://path for disabled
+        // Build the autoload value: *res://path for enabled, res://path for disabled.
+        // Strip any res:// prefix from the input first (resolveWithinProject accepts it,
+        // so the guard above passes for res:// paths) to avoid writing a corrupt
+        // "res://res://..." entry into project.godot.
+        const scriptPathStr = script_path as string;
+        const normalizedScriptPath = scriptPathStr.startsWith('res://')
+          ? scriptPathStr.slice('res://'.length)
+          : scriptPathStr;
         const prefix = (enabled as boolean) !== false ? '*' : '';
-        const resPath = `${prefix}res://${script_path as string}`;
+        const resPath = `${prefix}res://${normalizedScriptPath}`;
 
         const result = await runOperation(
           ctx,

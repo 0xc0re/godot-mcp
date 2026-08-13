@@ -1541,5 +1541,65 @@ describe('Config MCP Tools', () => {
       await expectPathRejected('add_autoload', { project_path: '/proj', name: 'EventBus', script_path: '../../evil.gd' }, 'script_path');
       expect(runOperation).not.toHaveBeenCalled();
     });
+
+    it('add_autoload normalizes a res://-prefixed script_path to a single res:// value', async () => {
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
+
+      const handler = handlers.get('add_autoload')!;
+      const result = (await handler({
+        project_path: '/proj',
+        name: 'EventBus',
+        script_path: 'res://scripts/autoloads/event_bus.gd',
+      })) as { isError?: boolean };
+
+      expect(result.isError).toBeUndefined();
+      expect(runOperation).toHaveBeenCalledWith(
+        ctx,
+        '/proj',
+        'modify_project_setting',
+        {
+          section: 'autoload',
+          key: 'EventBus',
+          // Single res:// prefix — never "*res://res://..."
+          value: '*res://scripts/autoloads/event_bus.gd',
+          action: 'set',
+        },
+      );
+    });
+
+    it('add_autoload leaves a plain relative script_path with a single res:// prefix', async () => {
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
+
+      const handler = handlers.get('add_autoload')!;
+      await handler({
+        project_path: '/proj',
+        name: 'EventBus',
+        script_path: 'scripts/autoloads/event_bus.gd',
+      });
+
+      expect(runOperation).toHaveBeenCalledWith(
+        ctx,
+        '/proj',
+        'modify_project_setting',
+        {
+          section: 'autoload',
+          key: 'EventBus',
+          value: '*res://scripts/autoloads/event_bus.gd',
+          action: 'set',
+        },
+      );
+    });
   });
 });
