@@ -15,6 +15,7 @@ import type {
   SubResource,
   Connection,
 } from './tscn-types.js';
+import { isBalanced } from './text-utils.js';
 
 /** Parsed section header: [type key=val key="val" ...] */
 interface SectionHeader {
@@ -65,57 +66,6 @@ function parsePropertyLine(line: string): [string, string] | null {
   const eqIdx = line.indexOf(' = ');
   if (eqIdx === -1) return null;
   return [line.substring(0, eqIdx).trim(), line.substring(eqIdx + 3).trim()];
-}
-
-/**
- * Check if a string value has balanced brackets/parentheses,
- * indicating it is a complete (not multi-line) value.
- */
-function isBalanced(value: string): boolean {
-  let parenDepth = 0;
-  let braceDepth = 0;
-  let bracketDepth = 0;
-  let inString = false;
-  let escapeNext = false;
-
-  for (const ch of value) {
-    if (escapeNext) {
-      escapeNext = false;
-      continue;
-    }
-    if (ch === '\\') {
-      escapeNext = true;
-      continue;
-    }
-    if (ch === '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) continue;
-
-    switch (ch) {
-      case '(':
-        parenDepth++;
-        break;
-      case ')':
-        parenDepth--;
-        break;
-      case '{':
-        braceDepth++;
-        break;
-      case '}':
-        braceDepth--;
-        break;
-      case '[':
-        bracketDepth++;
-        break;
-      case ']':
-        bracketDepth--;
-        break;
-    }
-  }
-
-  return parenDepth === 0 && braceDepth === 0 && bracketDepth === 0;
 }
 
 /**

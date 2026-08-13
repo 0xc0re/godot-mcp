@@ -10,60 +10,7 @@
  */
 
 import type { ParsedProjectSettings } from './project-types.js';
-
-/**
- * Check if a string value has balanced brackets/parentheses/braces,
- * indicating it is a complete (not multi-line) value.
- *
- * Note: duplicated from tscn-parser.ts to avoid changing that module's
- * exports. Both implementations are identical (~40 lines).
- */
-function isBalanced(value: string): boolean {
-  let parenDepth = 0;
-  let braceDepth = 0;
-  let bracketDepth = 0;
-  let inString = false;
-  let escapeNext = false;
-
-  for (const ch of value) {
-    if (escapeNext) {
-      escapeNext = false;
-      continue;
-    }
-    if (ch === '\\') {
-      escapeNext = true;
-      continue;
-    }
-    if (ch === '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) continue;
-
-    switch (ch) {
-      case '(':
-        parenDepth++;
-        break;
-      case ')':
-        parenDepth--;
-        break;
-      case '{':
-        braceDepth++;
-        break;
-      case '}':
-        braceDepth--;
-        break;
-      case '[':
-        bracketDepth++;
-        break;
-      case ']':
-        bracketDepth--;
-        break;
-    }
-  }
-
-  return parenDepth === 0 && braceDepth === 0 && bracketDepth === 0;
-}
+import { isBalanced } from './text-utils.js';
 
 /**
  * Parse project.godot file content into structured settings.

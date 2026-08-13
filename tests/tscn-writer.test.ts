@@ -300,6 +300,86 @@ describe('tscn-writer', () => {
       expect(result).toContain('item/0/name = "first"');
     });
 
+    it('rejects a forged Color component instead of interpolating it raw', () => {
+      // A string component in a Color object would previously be interpolated
+      // raw into unquoted Color(...) syntax, forging a new [node] section.
+      const forged = '0, 0, 0, 0)\n\n[node name="Injected" type="Node2D" parent="."]\nx = Color(0';
+      expect(() => {
+        addNodeToScene(MINIMAL_SCENE, {
+          nodeType: 'Sprite2D',
+          nodeName: 'Victim',
+          properties: { modulate: { r: forged, g: 0, b: 0 } },
+        });
+      }).toThrow(/Invalid numeric component/);
+    });
+
+    it('rejects a forged Vector component instead of interpolating it raw', () => {
+      const forged = '0, 0)\n\n[node name="Injected" type="Node2D" parent="."]\nposition = Vector2(0';
+      expect(() => {
+        addNodeToScene(MINIMAL_SCENE, {
+          nodeType: 'Node2D',
+          nodeName: 'Victim',
+          properties: { position: { x: forged, y: 1 } },
+        });
+      }).toThrow(/Invalid numeric component/);
+    });
+
+    it('accepts numeric-string components by coercing them with Number()', () => {
+      const result = addNodeToScene(MINIMAL_SCENE, {
+        nodeType: 'Node2D',
+        nodeName: 'Coerced',
+        properties: { position: { x: '1.5', y: '2' } },
+      });
+      expect(result).toContain('position = Vector2(1.5, 2)');
+
+      const parsed = parseScene(result);
+      expect(parsed.nodes.map((n) => n.name)).toEqual(['Main', 'Coerced']);
+    });
+
+    it('rejects NaN and non-finite numeric components', () => {
+      expect(() => {
+        addNodeToScene(MINIMAL_SCENE, {
+          nodeType: 'Node2D',
+          nodeName: 'Victim',
+          properties: { position: { x: NaN, y: 0 } },
+        });
+      }).toThrow(/Invalid numeric component/);
+      expect(() => {
+        addNodeToScene(MINIMAL_SCENE, {
+          nodeType: 'Node2D',
+          nodeName: 'Victim',
+          properties: { scale: { x: Infinity, y: 1 } },
+        });
+      }).toThrow(/Invalid numeric component/);
+    });
+
+    it('keeps a malicious array value inert through a parse round-trip (fallback escape)', () => {
+      // Arrays hit the final fallback, which previously emitted raw
+      // String(value) — a crafted element could forge a [node] section.
+      const maliciousArray = ['x"\n\n[node name="Injected" type="Node2D" parent="."]\ny = "pwn'];
+      const result = addNodeToScene(MINIMAL_SCENE, {
+        nodeType: 'Label',
+        nodeName: 'Victim',
+        properties: { items: maliciousArray },
+      });
+
+      const parsed = parseScene(result);
+      const names = parsed.nodes.map((n) => n.name);
+      expect(names).toContain('Victim');
+      expect(names).not.toContain('Injected');
+      expect(parsed.nodes).toHaveLength(2);
+    });
+
+    it('serializes null and undefined values as null literals', () => {
+      const result = addNodeToScene(MINIMAL_SCENE, {
+        nodeType: 'Node2D',
+        nodeName: 'Nullish',
+        properties: { a: null, b: undefined },
+      });
+      expect(result).toContain('a = null');
+      expect(result).toContain('b = null');
+    });
+
     it('rejects a parentNodePath that tries to break out of the parent attribute', () => {
       // A parent path that tries to close the attribute and forge a new
       // [node] section. Quotes/backslashes/newlines are illegal in Godot node

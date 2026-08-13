@@ -50,21 +50,45 @@ function escapeTscnString(value: string): string {
 }
 
 /**
+ * Coerce a Color/Vector component to a finite number literal.
+ *
+ * Components are interpolated into unquoted constructor syntax
+ * (`Color(...)`, `Vector2(...)`), so a string component interpolated raw
+ * could forge extra property lines or [node] sections. Number() coercion
+ * plus a finiteness check guarantees the emitted text is a bare numeric
+ * literal and nothing else.
+ *
+ * @throws Error if the component is not coercible to a finite number
+ */
+function numericComponent(component: unknown, label: string): string {
+  const n = Number(component);
+  if (!Number.isFinite(n)) {
+    throw new Error(
+      `Invalid numeric component "${label}": ${JSON.stringify(component)} is not a finite number`,
+    );
+  }
+  return String(n);
+}
+
+/**
  * Serialize a property value to Godot .tscn format.
  *
  * - Objects with x,y -> Vector2(x, y)
  * - Objects with x,y,z -> Vector3(x, y, z)
  * - Objects with r,g,b -> Color(r, g, b, a)
  * - Booleans -> true/false
- * - Numbers -> literal
+ * - Numbers -> literal (non-finite numbers rejected)
  * - Strings -> "quoted"
+ * - null/undefined -> null
+ * - Anything else (arrays, bigint, ...) -> escaped JSON string literal
+ *   (never raw String(value), which could forge .tscn sections)
  */
 function serializeGodotValue(value: unknown): string {
   if (typeof value === 'boolean') {
     return value ? 'true' : 'false';
   }
   if (typeof value === 'number') {
-    return String(value);
+    return numericComponent(value, 'value');
   }
   if (typeof value === 'string') {
     return `"${escapeTscnString(value)}"`;
@@ -74,20 +98,31 @@ function serializeGodotValue(value: unknown): string {
     // Color: has r, g, b keys
     if ('r' in obj && 'g' in obj && 'b' in obj) {
       const a = 'a' in obj ? obj.a : 1;
-      return `Color(${obj.r}, ${obj.g}, ${obj.b}, ${a})`;
+      return `Color(${numericComponent(obj.r, 'r')}, ${numericComponent(obj.g, 'g')}, ${numericComponent(obj.b, 'b')}, ${numericComponent(a, 'a')})`;
     }
     // Vector3: has x, y, z keys
     if ('x' in obj && 'y' in obj && 'z' in obj) {
-      return `Vector3(${obj.x}, ${obj.y}, ${obj.z})`;
+      return `Vector3(${numericComponent(obj.x, 'x')}, ${numericComponent(obj.y, 'y')}, ${numericComponent(obj.z, 'z')})`;
     }
     // Vector2: has x, y keys
     if ('x' in obj && 'y' in obj) {
-      return `Vector2(${obj.x}, ${obj.y})`;
+      return `Vector2(${numericComponent(obj.x, 'x')}, ${numericComponent(obj.y, 'y')})`;
     }
     // Fallback: JSON string
     return `"${escapeTscnString(JSON.stringify(value))}"`;
   }
-  return String(value);
+  if (value === null || value === undefined) {
+    return 'null';
+  }
+  // Final fallback (arrays, bigint, symbols, ...): serialize as an escaped
+  // string literal so the raw value can never break out of the property line.
+  let json: string | undefined;
+  try {
+    json = JSON.stringify(value);
+  } catch {
+    json = undefined;
+  }
+  return `"${escapeTscnString(json ?? String(value))}"`;
 }
 
 /**
