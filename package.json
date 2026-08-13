@@ -9,16 +9,19 @@
     "claude",
     "cline"
   ],
-  "homepage": "https://github.com/Coding-Solo/godot-mcp",
+  "homepage": "https://github.com/0xc0re/godot-mcp",
   "bugs": {
-    "url": "https://github.com/Coding-Solo/godot-mcp/issues"
+    "url": "https://github.com/0xc0re/godot-mcp/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Coding-Solo/godot-mcp.git"
+    "url": "https://github.com/0xc0re/godot-mcp.git"
   },
   "license": "MIT",
-  "author": "Solomon Elias <solomon@sippy.ai>",
+  "author": "Christopher Story <chris@nctcog.io>",
+  "contributors": [
+    "Solomon Elias <solomon@sippy.ai> (original author, Coding-Solo/godot-mcp)"
+  ],
   "type": "module",
   "bin": {
     "godot-mcp": "./build/index.js"
