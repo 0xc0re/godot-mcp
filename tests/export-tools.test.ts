@@ -25,6 +25,14 @@ vi.mock('fs', async () => {
 // bespoke path never calls it)
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
+  // Pure-path stand-in for the real resolveWithinProject: rejects null bytes,
+  // ".." traversal, and absolute paths; strips res:// and joins to the root.
+  resolveWithinProject: vi.fn((projectRoot: string, relPath: string) => {
+    if (typeof relPath !== 'string' || relPath.length === 0 || relPath.includes('\0')) return null;
+    const stripped = relPath.startsWith('res://') ? relPath.slice('res://'.length) : relPath;
+    if (stripped.startsWith('/') || stripped.split('/').includes('..')) return null;
+    return `${projectRoot}/${stripped}`;
+  }),
   execGodot: vi.fn(),
   runOperation: vi.fn(),
 }));
@@ -893,6 +901,41 @@ describe('Export MCP Tools', () => {
       expect(audioCheck.status).toBe('warn');
       expect(audioCheck.detail).toContain('OGG Vorbis');
       expect(audioCheck.detail).toContain('never MP3');
+    });
+  });
+
+  // ── path hardening rollout (resolveWithinProject) ───────────────────
+
+  describe('path hardening', () => {
+    beforeEach(() => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+    });
+
+    async function expectPathRejected(
+      tool: string,
+      params: Record<string, unknown>,
+      paramName: string,
+    ): Promise<void> {
+      const handler = handlers.get(tool)!;
+      const result = (await handler(params)) as {
+        isError?: boolean;
+        content?: Array<{ text: string }>;
+      };
+      expect(result.isError).toBe(true);
+      expect(result.content?.[0].text).toContain(paramName);
+    }
+
+    it('export_project rejects output_path traversal outside the project', async () => {
+      vi.mocked(readFileSync).mockReturnValue('');
+      vi.mocked(parseProjectSettings).mockReturnValue({
+        sections: {
+          'preset.0': { name: '"Web"', platform: '"Web"', runnable: 'true' },
+        },
+        configVersion: 0,
+      });
+      await expectPathRejected('export_project', { project_path: '/proj', preset_name: 'Web', output_path: '../../escape/index.html' }, 'output_path');
+      expect(execGodot).not.toHaveBeenCalled();
     });
   });
 });

@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { runOperation, validatePath } from '../godot.js';
+import { resolveWithinProject, runOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 
 export function registerCompositionTools(server: McpServer, ctx: ServerContext): void {
@@ -55,6 +55,13 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           return toolError(`Not a valid Godot project: ${project_path}`, [
             'Ensure the path points to a directory containing a project.godot file',
             'Use list_projects to find valid Godot projects',
+          ]);
+        }
+
+        if (resolveWithinProject(project_path, scene_path) === null) {
+          return toolError('Invalid scene_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
           ]);
         }
 
@@ -137,6 +144,13 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           ]);
         }
 
+        if (resolveWithinProject(project_path, scene_path) === null) {
+          return toolError('Invalid scene_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
+
         const params = {
           scenePath: scene_path,
           sourceNodePath: source_node_path,
@@ -209,6 +223,20 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           return toolError(`Not a valid Godot project: ${project_path}`, [
             'Ensure the path points to a directory containing a project.godot file',
             'Use list_projects to find valid Godot projects',
+          ]);
+        }
+
+        if (resolveWithinProject(project_path, scene_path) === null) {
+          return toolError('Invalid scene_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
+
+        if (resolveWithinProject(project_path, child_scene_path) === null) {
+          return toolError('Invalid child_scene_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
           ]);
         }
 
@@ -298,6 +326,13 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           ]);
         }
 
+        if (resolveWithinProject(project_path, scene_path) === null) {
+          return toolError('Invalid scene_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
+
         const params = {
           scenePath: scene_path,
           operations: ops,
@@ -373,6 +408,13 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           return toolError('At least one of add_groups or remove_groups must be provided', [
             'Provide add_groups to add the node to groups',
             'Provide remove_groups to remove the node from groups',
+          ]);
+        }
+
+        if (resolveWithinProject(project_path, scene_path) === null) {
+          return toolError('Invalid scene_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
           ]);
         }
 

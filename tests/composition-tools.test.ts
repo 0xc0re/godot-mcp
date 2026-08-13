@@ -21,6 +21,14 @@ vi.mock('fs', async () => {
 // Mock godot module
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
+  // Pure-path stand-in for the real resolveWithinProject: rejects null bytes,
+  // ".." traversal, and absolute paths; strips res:// and joins to the root.
+  resolveWithinProject: vi.fn((projectRoot: string, relPath: string) => {
+    if (typeof relPath !== 'string' || relPath.length === 0 || relPath.includes('\0')) return null;
+    const stripped = relPath.startsWith('res://') ? relPath.slice('res://'.length) : relPath;
+    if (stripped.startsWith('/') || stripped.split('/').includes('..')) return null;
+    return `${projectRoot}/${stripped}`;
+  }),
   executeOperation: vi.fn(),
   runOperation: vi.fn(),
 }));
@@ -758,6 +766,54 @@ describe('Composition MCP Tools', () => {
         expect.stringContaining('Node not found: root/Player'),
         expect.any(Array),
       );
+    });
+  });
+
+  // ── path hardening rollout (resolveWithinProject) ───────────────────
+
+  describe('path hardening', () => {
+    beforeEach(() => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+    });
+
+    async function expectPathRejected(
+      tool: string,
+      params: Record<string, unknown>,
+      paramName: string,
+    ): Promise<void> {
+      const handler = handlers.get(tool)!;
+      const result = (await handler(params)) as {
+        isError?: boolean;
+        content?: Array<{ text: string }>;
+      };
+      expect(result.isError).toBe(true);
+      expect(result.content?.[0].text).toContain(paramName);
+    }
+
+    it('connect_signal rejects scene_path traversal outside the project', async () => {
+      await expectPathRejected('connect_signal', { project_path: '/proj', scene_path: '../../evil.tscn', source_node_path: 'root/Button', signal_name: 'pressed', target_node_path: 'root', method_name: '_on' }, 'scene_path');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('disconnect_signal rejects scene_path traversal', async () => {
+      await expectPathRejected('disconnect_signal', { project_path: '/proj', scene_path: '../../evil.tscn', source_node_path: 'root/Button', signal_name: 'pressed', target_node_path: 'root', method_name: '_on' }, 'scene_path');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('instance_scene rejects child_scene_path traversal', async () => {
+      await expectPathRejected('instance_scene', { project_path: '/proj', scene_path: 'scenes/main.tscn', child_scene_path: '../../outside/enemy.tscn', parent_node_path: 'root' }, 'child_scene_path');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('batch_set_properties rejects scene_path traversal', async () => {
+      await expectPathRejected('batch_set_properties', { project_path: '/proj', scene_path: '../../evil.tscn', operations: [{ node_path: 'root', property_name: 'visible', value: true }] }, 'scene_path');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('manage_groups rejects scene_path traversal', async () => {
+      await expectPathRejected('manage_groups', { project_path: '/proj', scene_path: '../../evil.tscn', node_path: 'root/Player', add_groups: ['g'] }, 'scene_path');
+      expect(runOperation).not.toHaveBeenCalled();
     });
   });
 });

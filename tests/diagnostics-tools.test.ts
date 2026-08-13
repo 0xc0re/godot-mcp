@@ -21,6 +21,14 @@ vi.mock('fs', async () => {
 // Mock godot module
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
+  // Pure-path stand-in for the real resolveWithinProject: rejects null bytes,
+  // ".." traversal, and absolute paths; strips res:// and joins to the root.
+  resolveWithinProject: vi.fn((projectRoot: string, relPath: string) => {
+    if (typeof relPath !== 'string' || relPath.length === 0 || relPath.includes('\0')) return null;
+    const stripped = relPath.startsWith('res://') ? relPath.slice('res://'.length) : relPath;
+    if (stripped.startsWith('/') || stripped.split('/').includes('..')) return null;
+    return `${projectRoot}/${stripped}`;
+  }),
   trackProcess: vi.fn((_ctx: unknown, proc: unknown) => proc),
 }));
 
@@ -471,6 +479,34 @@ describe('Diagnostics MCP Tools', () => {
       expect(autoloadIssue.detail).toContain('GameManager');
       expect(autoloadIssue.detail).toContain('AudioManager');
       expect(autoloadIssue.detail).toContain('MCP add_node/modify_node may corrupt');
+    });
+  });
+
+  // ── path hardening rollout (resolveWithinProject) ───────────────────
+
+  describe('path hardening', () => {
+    beforeEach(() => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+    });
+
+    async function expectPathRejected(
+      tool: string,
+      params: Record<string, unknown>,
+      paramName: string,
+    ): Promise<void> {
+      const handler = handlers.get(tool)!;
+      const result = (await handler(params)) as {
+        isError?: boolean;
+        content?: Array<{ text: string }>;
+      };
+      expect(result.isError).toBe(true);
+      expect(result.content?.[0].text).toContain(paramName);
+    }
+
+    it('validate_scene rejects scene_path traversal before reading the file', async () => {
+      await expectPathRejected('validate_scene', { project_path: '/proj', scene_path: '../../../etc/passwd' }, 'scene_path');
+      expect(readFileSync).not.toHaveBeenCalled();
     });
   });
 });

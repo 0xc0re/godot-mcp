@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { join } from 'path';
 import { existsSync, readFileSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { runOperation, validatePath } from '../godot.js';
+import { resolveWithinProject, runOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 import { parseResource } from '../parsers/tscn-parser.js';
 
@@ -48,7 +48,13 @@ export function registerResourceTools(server: McpServer, ctx: ServerContext): vo
           ]);
         }
 
-        const resourceFilePath = join(project_path, resource_path);
+        const resourceFilePath = resolveWithinProject(project_path, resource_path);
+        if (resourceFilePath === null) {
+          return toolError('Invalid resource_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
         if (!existsSync(resourceFilePath)) {
           return toolError(`Resource file does not exist: ${resource_path}`, [
             'Ensure the resource path is correct',
@@ -125,6 +131,13 @@ export function registerResourceTools(server: McpServer, ctx: ServerContext): vo
           return toolError(`Not a valid Godot project: ${project_path}`, [
             'Ensure the path points to a directory containing a project.godot file',
             'Use list_projects to find valid Godot projects',
+          ]);
+        }
+
+        if (resolveWithinProject(project_path, output_path) === null) {
+          return toolError('Invalid output_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
           ]);
         }
 
@@ -213,7 +226,13 @@ export function registerResourceTools(server: McpServer, ctx: ServerContext): vo
           ]);
         }
 
-        const resourceFilePath = join(project_path, resource_path);
+        const resourceFilePath = resolveWithinProject(project_path, resource_path);
+        if (resourceFilePath === null) {
+          return toolError('Invalid resource_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
         if (!existsSync(resourceFilePath)) {
           return toolError(`Resource file does not exist: ${resource_path}`, [
             'Ensure the resource path is correct',

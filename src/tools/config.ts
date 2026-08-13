@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { join } from 'path';
 import { existsSync, readFileSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { runOperation, validatePath } from '../godot.js';
+import { resolveWithinProject, runOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 import { parseProjectSettings } from '../parsers/project-parser.js';
 
@@ -428,6 +428,13 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           ]);
         }
 
+        if (resolveWithinProject(project_path as string, scene_path as string) === null) {
+          return toolError('Invalid scene_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
+
         // Read layer name mappings from project.godot
         const content = readFileSync(projectFile, 'utf-8');
         const parsed = parseProjectSettings(content);
@@ -636,8 +643,14 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           ]);
         }
 
-        // Validate the script file exists
-        const fullScriptPath = join(project_path as string, script_path as string);
+        // Validate the script file stays inside the project and exists
+        const fullScriptPath = resolveWithinProject(project_path as string, script_path as string);
+        if (fullScriptPath === null) {
+          return toolError('Invalid script_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
         if (!existsSync(fullScriptPath)) {
           return toolError(`Script file not found: ${script_path}`, [
             'Ensure the script file exists at the specified path',

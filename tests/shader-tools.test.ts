@@ -23,6 +23,14 @@ vi.mock('fs', async () => {
 // Mock godot module
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
+  // Pure-path stand-in for the real resolveWithinProject: rejects null bytes,
+  // ".." traversal, and absolute paths; strips res:// and joins to the root.
+  resolveWithinProject: vi.fn((projectRoot: string, relPath: string) => {
+    if (typeof relPath !== 'string' || relPath.length === 0 || relPath.includes('\0')) return null;
+    const stripped = relPath.startsWith('res://') ? relPath.slice('res://'.length) : relPath;
+    if (stripped.startsWith('/') || stripped.split('/').includes('..')) return null;
+    return `${projectRoot}/${stripped}`;
+  }),
   executeOperation: vi.fn(),
   runOperation: vi.fn(),
 }));
@@ -462,6 +470,49 @@ describe('Shader MCP Tools', () => {
       }) as { isError?: boolean };
 
       expect(result.isError).toBe(true);
+    });
+  });
+
+  // ── path hardening rollout (resolveWithinProject) ───────────────────
+
+  describe('path hardening', () => {
+    beforeEach(() => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+    });
+
+    async function expectPathRejected(
+      tool: string,
+      params: Record<string, unknown>,
+      paramName: string,
+    ): Promise<void> {
+      const handler = handlers.get(tool)!;
+      const result = (await handler(params)) as {
+        isError?: boolean;
+        content?: Array<{ text: string }>;
+      };
+      expect(result.isError).toBe(true);
+      expect(result.content?.[0].text).toContain(paramName);
+    }
+
+    it('create_shader rejects shader_path traversal before writing to disk', async () => {
+      await expectPathRejected('create_shader', { project_path: '/proj', shader_path: '../../evil.gdshader', shader_type: 'canvas_item', shader_code: 'void fragment() {}' }, 'shader_path');
+      expect(writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it('create_shader_material rejects shader_path traversal', async () => {
+      await expectPathRejected('create_shader_material', { project_path: '/proj', shader_path: '../../evil.gdshader', output_path: 'materials/m.tres' }, 'shader_path');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('create_shader_material rejects output_path traversal', async () => {
+      await expectPathRejected('create_shader_material', { project_path: '/proj', shader_path: 'shaders/glow.gdshader', output_path: '../../evil.tres' }, 'output_path');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('set_shader_params rejects material_path traversal', async () => {
+      await expectPathRejected('set_shader_params', { project_path: '/proj', material_path: '../../evil.tres', shader_params: { speed: 1 } }, 'material_path');
+      expect(runOperation).not.toHaveBeenCalled();
     });
   });
 });

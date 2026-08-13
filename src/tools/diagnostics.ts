@@ -13,7 +13,7 @@ import { join } from 'path';
 import { spawn } from 'child_process';
 import { Socket } from 'net';
 import type { ServerContext } from '../types.js';
-import { validatePath, trackProcess } from '../godot.js';
+import { resolveWithinProject, validatePath, trackProcess } from '../godot.js';
 import { toolError } from '../errors.js';
 import { LspClient } from '../lsp/client.js';
 import { parseScene } from '../parsers/tscn-parser.js';
@@ -211,7 +211,13 @@ export function registerDiagnosticsTools(server: McpServer, ctx: ServerContext):
           ]);
         }
 
-        const sceneFilePath = join(project_path, scene_path);
+        const sceneFilePath = resolveWithinProject(project_path, scene_path);
+        if (sceneFilePath === null) {
+          return toolError('Invalid scene_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
         if (!existsSync(sceneFilePath)) {
           return toolError(`Scene file does not exist: ${scene_path}`, [
             'Ensure the scene path is correct',

@@ -17,7 +17,7 @@ import { z } from 'zod';
 import { join } from 'path';
 import { existsSync, readFileSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { execGodot, validatePath } from '../godot.js';
+import { execGodot, resolveWithinProject, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 import { parseProjectSettings } from '../parsers/project-parser.js';
 
@@ -114,10 +114,18 @@ export function registerExportTools(server: McpServer, ctx: ServerContext): void
           );
         }
 
+        // Resolve the output path inside the project before passing it to Godot
+        const fullOutputPath = resolveWithinProject(project_path as string, output_path as string);
+        if (fullOutputPath === null) {
+          return toolError('Invalid output_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
+
         // Build CLI args for Godot export
         const exportFlag =
           (mode as string) === 'debug' ? '--export-debug' : '--export-release';
-        const fullOutputPath = join(project_path as string, output_path as string);
         const args = [
           '--headless',
           '--path',

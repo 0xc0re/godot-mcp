@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { join, dirname } from 'path';
 import { existsSync, writeFileSync, mkdirSync, readFileSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { runOperation, validatePath } from '../godot.js';
+import { resolveWithinProject, runOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 
 /**
@@ -116,8 +116,14 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
           '',
         ].join('\n');
 
-        // Create parent directories if they don't exist
-        const fullPath = join(project_path, script_path);
+        // Resolve inside the project, then create parent directories if they don't exist
+        const fullPath = resolveWithinProject(project_path, script_path);
+        if (fullPath === null) {
+          return toolError('Invalid script_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
         const parentDir = dirname(fullPath);
         if (!existsSync(parentDir)) {
           mkdirSync(parentDir, { recursive: true });
@@ -310,8 +316,14 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
           '',
         ].join('\n');
 
-        // Create parent directories if they don't exist
-        const fullPath = join(project_path as string, script_path as string);
+        // Resolve inside the project, then create parent directories if they don't exist
+        const fullPath = resolveWithinProject(project_path as string, script_path as string);
+        if (fullPath === null) {
+          return toolError('Invalid script_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
         const parentDir = dirname(fullPath);
         if (!existsSync(parentDir)) {
           mkdirSync(parentDir, { recursive: true });
@@ -435,8 +447,14 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
           '',
         ].join('\n');
 
-        // Create parent directories if they don't exist
-        const fullPath = join(project_path as string, script_path as string);
+        // Resolve inside the project, then create parent directories if they don't exist
+        const fullPath = resolveWithinProject(project_path as string, script_path as string);
+        if (fullPath === null) {
+          return toolError('Invalid script_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
         const parentDir = dirname(fullPath);
         if (!existsSync(parentDir)) {
           mkdirSync(parentDir, { recursive: true });
@@ -510,8 +528,14 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
           ]);
         }
 
-        // Read the source script
-        const sourceFullPath = join(project_path as string, script_path as string);
+        // Read the source script (resolved inside the project)
+        const sourceFullPath = resolveWithinProject(project_path as string, script_path as string);
+        if (sourceFullPath === null) {
+          return toolError('Invalid script_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
         if (!existsSync(sourceFullPath)) {
           return toolError(`Source script not found: ${script_path as string}`, [
             'Ensure the script_path points to an existing .gd file',
@@ -581,8 +605,14 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
         testLines.push('');
         const gdscript = testLines.join('\n');
 
-        // Create parent directories if they don't exist
-        const fullPath = join(project_path as string, resolvedTestPath);
+        // Resolve inside the project, then create parent directories if they don't exist
+        const fullPath = resolveWithinProject(project_path as string, resolvedTestPath);
+        if (fullPath === null) {
+          return toolError('Invalid test_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
         const parentDir = dirname(fullPath);
         if (!existsSync(parentDir)) {
           mkdirSync(parentDir, { recursive: true });
@@ -716,8 +746,14 @@ export function registerScaffoldTools(server: McpServer, ctx: ServerContext): vo
           '',
         ].join('\n');
 
-        // Create parent directories if they don't exist
-        const fullPath = join(project_path as string, script_path as string);
+        // Resolve inside the project, then create parent directories if they don't exist
+        const fullPath = resolveWithinProject(project_path as string, script_path as string);
+        if (fullPath === null) {
+          return toolError('Invalid script_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
         const parentDir = dirname(fullPath);
         if (!existsSync(parentDir)) {
           mkdirSync(parentDir, { recursive: true });

@@ -24,6 +24,14 @@ vi.mock('fs', async () => {
 // Mock godot module
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
+  // Pure-path stand-in for the real resolveWithinProject: rejects null bytes,
+  // ".." traversal, and absolute paths; strips res:// and joins to the root.
+  resolveWithinProject: vi.fn((projectRoot: string, relPath: string) => {
+    if (typeof relPath !== 'string' || relPath.length === 0 || relPath.includes('\0')) return null;
+    const stripped = relPath.startsWith('res://') ? relPath.slice('res://'.length) : relPath;
+    if (stripped.startsWith('/') || stripped.split('/').includes('..')) return null;
+    return `${projectRoot}/${stripped}`;
+  }),
   executeOperation: vi.fn(),
   runOperation: vi.fn(),
 }));
@@ -1499,6 +1507,39 @@ describe('Config MCP Tools', () => {
       }) as { isError?: boolean };
 
       expect(result.isError).toBe(true);
+    });
+  });
+
+  // ── path hardening rollout (resolveWithinProject) ───────────────────
+
+  describe('path hardening', () => {
+    beforeEach(() => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+    });
+
+    async function expectPathRejected(
+      tool: string,
+      params: Record<string, unknown>,
+      paramName: string,
+    ): Promise<void> {
+      const handler = handlers.get(tool)!;
+      const result = (await handler(params)) as {
+        isError?: boolean;
+        content?: Array<{ text: string }>;
+      };
+      expect(result.isError).toBe(true);
+      expect(result.content?.[0].text).toContain(paramName);
+    }
+
+    it('set_node_collision rejects scene_path traversal outside the project', async () => {
+      await expectPathRejected('set_node_collision', { project_path: '/proj', scene_path: '../../evil.tscn', node_path: '.', collision_layer: ['Player'] }, 'scene_path');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('add_autoload rejects script_path traversal', async () => {
+      await expectPathRejected('add_autoload', { project_path: '/proj', name: 'EventBus', script_path: '../../evil.gd' }, 'script_path');
+      expect(runOperation).not.toHaveBeenCalled();
     });
   });
 });

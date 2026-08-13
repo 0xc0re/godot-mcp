@@ -23,6 +23,14 @@ vi.mock('fs', async () => {
 // Mock godot module
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
+  // Pure-path stand-in for the real resolveWithinProject: rejects null bytes,
+  // ".." traversal, and absolute paths; strips res:// and joins to the root.
+  resolveWithinProject: vi.fn((projectRoot: string, relPath: string) => {
+    if (typeof relPath !== 'string' || relPath.length === 0 || relPath.includes('\0')) return null;
+    const stripped = relPath.startsWith('res://') ? relPath.slice('res://'.length) : relPath;
+    if (stripped.startsWith('/') || stripped.split('/').includes('..')) return null;
+    return `${projectRoot}/${stripped}`;
+  }),
   runOperation: vi.fn(),
 }));
 
@@ -630,6 +638,60 @@ describe('Scaffold MCP Tools', () => {
       const written = vi.mocked(writeFileSync).mock.calls[0][1] as string;
       expect(written).toContain('@export var max_health: int = 50');
       expect(written).toContain('@export var invincibility_duration: float = 0.5');
+    });
+  });
+
+  // ── path hardening rollout (resolveWithinProject) ───────────────────
+
+  describe('path hardening', () => {
+    beforeEach(() => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+    });
+
+    async function expectPathRejected(
+      tool: string,
+      params: Record<string, unknown>,
+      paramName: string,
+    ): Promise<void> {
+      const handler = handlers.get(tool)!;
+      const result = (await handler(params)) as {
+        isError?: boolean;
+        content?: Array<{ text: string }>;
+      };
+      expect(result.isError).toBe(true);
+      expect(result.content?.[0].text).toContain(paramName);
+    }
+
+    it('scaffold_event_bus rejects script_path traversal before writing', async () => {
+      await expectPathRejected('scaffold_event_bus', { project_path: '/proj', script_path: '../../evil.gd', signals: [{ name: 'ping', params: [] }] }, 'script_path');
+      expect(writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it('scaffold_config_manager rejects script_path traversal before writing', async () => {
+      await expectPathRejected('scaffold_config_manager', { project_path: '/proj', script_path: '../../evil.gd', save_path: 'user://settings.cfg', sections: [{ name: 'audio', fields: [{ name: 'volume', type: 'float', default: '1.0' }] }] }, 'script_path');
+      expect(writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it('scaffold_resource_class rejects script_path traversal before writing', async () => {
+      await expectPathRejected('scaffold_resource_class', { project_path: '/proj', script_path: '../../evil.gd', class_name: 'AvatarData', fields: [{ name: 'hp', type: 'int' }] }, 'script_path');
+      expect(writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it('scaffold_tests rejects script_path traversal before reading the source', async () => {
+      await expectPathRejected('scaffold_tests', { project_path: '/proj', script_path: '../../evil.gd' }, 'script_path');
+      expect(readFileSync).not.toHaveBeenCalled();
+    });
+
+    it('scaffold_tests rejects test_path traversal before writing', async () => {
+      vi.mocked(readFileSync).mockReturnValue('func foo():\n\tpass\n');
+      await expectPathRejected('scaffold_tests', { project_path: '/proj', script_path: 'scripts/a.gd', test_path: '../../evil_test.gd' }, 'test_path');
+      expect(writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it('scaffold_health_component rejects script_path traversal before writing', async () => {
+      await expectPathRejected('scaffold_health_component', { project_path: '/proj', script_path: '../../evil.gd' }, 'script_path');
+      expect(writeFileSync).not.toHaveBeenCalled();
     });
   });
 });

@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { join } from 'path';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { runOperation, validatePath } from '../godot.js';
+import { resolveWithinProject, runOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 import { parseScene } from '../parsers/tscn-parser.js';
 import { addNodeToScene } from '../parsers/tscn-writer.js';
@@ -44,6 +44,13 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           return toolError(`Not a valid Godot project: ${project_path}`, [
             'Ensure the path points to a directory containing a project.godot file',
             'Use list_projects to find valid Godot projects',
+          ]);
+        }
+
+        if (resolveWithinProject(project_path, scene_path) === null) {
+          return toolError('Invalid scene_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
           ]);
         }
 
@@ -127,7 +134,13 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ]);
         }
 
-        const scenePath = join(project_path, scene_path);
+        const scenePath = resolveWithinProject(project_path, scene_path);
+        if (scenePath === null) {
+          return toolError('Invalid scene_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
         if (!existsSync(scenePath)) {
           return toolError(`Scene file does not exist: ${scene_path}`, [
             'Ensure the scene path is correct',
@@ -203,7 +216,13 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ]);
         }
 
-        const sceneFilePath = join(project_path, scene_path);
+        const sceneFilePath = resolveWithinProject(project_path, scene_path);
+        if (sceneFilePath === null) {
+          return toolError('Invalid scene_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
         if (!existsSync(sceneFilePath)) {
           return toolError(`Scene file does not exist: ${scene_path}`, [
             'Ensure the scene path is correct',
@@ -211,7 +230,13 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ]);
         }
 
-        const textureFilePath = join(project_path, texture_path);
+        const textureFilePath = resolveWithinProject(project_path, texture_path);
+        if (textureFilePath === null) {
+          return toolError('Invalid texture_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
         if (!existsSync(textureFilePath)) {
           return toolError(`Texture file does not exist: ${texture_path}`, [
             'Ensure the texture path is correct',
@@ -294,11 +319,24 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ]);
         }
 
-        const sceneFilePath = join(project_path, scene_path);
+        const sceneFilePath = resolveWithinProject(project_path, scene_path);
+        if (sceneFilePath === null) {
+          return toolError('Invalid scene_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
         if (!existsSync(sceneFilePath)) {
           return toolError(`Scene file does not exist: ${scene_path}`, [
             'Ensure the scene path is correct',
             'Use create_scene to create a new scene first',
+          ]);
+        }
+
+        if (resolveWithinProject(project_path, output_path) === null) {
+          return toolError('Invalid output_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
           ]);
         }
 
@@ -379,11 +417,24 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ]);
         }
 
-        const sceneFilePath = join(project_path, scene_path);
+        const sceneFilePath = resolveWithinProject(project_path, scene_path);
+        if (sceneFilePath === null) {
+          return toolError('Invalid scene_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
         if (!existsSync(sceneFilePath)) {
           return toolError(`Scene file does not exist: ${scene_path}`, [
             'Ensure the scene path is correct',
             'Use create_scene to create a new scene first',
+          ]);
+        }
+
+        if (new_path && resolveWithinProject(project_path, new_path) === null) {
+          return toolError('Invalid new_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
           ]);
         }
 
@@ -457,7 +508,13 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ]);
         }
 
-        const sceneFilePath = join(project_path, scene_path);
+        const sceneFilePath = resolveWithinProject(project_path, scene_path);
+        if (sceneFilePath === null) {
+          return toolError('Invalid scene_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
         if (!existsSync(sceneFilePath)) {
           return toolError(`Scene file does not exist: ${scene_path}`, [
             'Ensure the scene path is correct',
@@ -546,7 +603,13 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ]);
         }
 
-        const sceneFilePath = join(project_path, scene_path);
+        const sceneFilePath = resolveWithinProject(project_path, scene_path);
+        if (sceneFilePath === null) {
+          return toolError('Invalid scene_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
         if (!existsSync(sceneFilePath)) {
           return toolError(`Scene file does not exist: ${scene_path}`, [
             'Ensure the scene path is correct',
@@ -626,7 +689,13 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ]);
         }
 
-        const sceneFilePath = join(project_path, scene_path);
+        const sceneFilePath = resolveWithinProject(project_path, scene_path);
+        if (sceneFilePath === null) {
+          return toolError('Invalid scene_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
         if (!existsSync(sceneFilePath)) {
           return toolError(`Scene file does not exist: ${scene_path}`, [
             'Ensure the scene path is correct',
@@ -710,11 +779,24 @@ export function registerSceneTools(server: McpServer, ctx: ServerContext): void 
           ]);
         }
 
-        const sceneFilePath = join(project_path, scene_path);
+        const sceneFilePath = resolveWithinProject(project_path, scene_path);
+        if (sceneFilePath === null) {
+          return toolError('Invalid scene_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
         if (!existsSync(sceneFilePath)) {
           return toolError(`Scene file does not exist: ${scene_path}`, [
             'Ensure the scene path is correct',
             'Use create_scene to create a new scene first',
+          ]);
+        }
+
+        if (resolveWithinProject(project_path, script_path) === null) {
+          return toolError('Invalid script_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
           ]);
         }
 

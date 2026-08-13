@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { join, dirname } from 'path';
 import { existsSync, writeFileSync, mkdirSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { runOperation, validatePath } from '../godot.js';
+import { resolveWithinProject, runOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 
 export function registerShaderTools(server: McpServer, ctx: ServerContext): void {
@@ -59,8 +59,15 @@ export function registerShaderTools(server: McpServer, ctx: ServerContext): void
           ]);
         }
 
+        const fullPath = resolveWithinProject(project_path as string, shaderPathStr);
+        if (fullPath === null) {
+          return toolError('Invalid shader_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
+
         const shaderSource = `shader_type ${shader_type};\n\n${shader_code}`;
-        const fullPath = join(project_path as string, shaderPathStr);
 
         mkdirSync(dirname(fullPath), { recursive: true });
         writeFileSync(fullPath, shaderSource, 'utf-8');
@@ -121,6 +128,20 @@ export function registerShaderTools(server: McpServer, ctx: ServerContext): void
           return toolError(`Not a valid Godot project: ${project_path}`, [
             'Ensure the path points to a directory containing a project.godot file',
             'Use list_projects to find valid Godot projects',
+          ]);
+        }
+
+        if (resolveWithinProject(project_path as string, shader_path as string) === null) {
+          return toolError('Invalid shader_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
+
+        if (resolveWithinProject(project_path as string, output_path as string) === null) {
+          return toolError('Invalid output_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
           ]);
         }
 
@@ -204,6 +225,13 @@ export function registerShaderTools(server: McpServer, ctx: ServerContext): void
           return toolError(`Not a valid Godot project: ${project_path}`, [
             'Ensure the path points to a directory containing a project.godot file',
             'Use list_projects to find valid Godot projects',
+          ]);
+        }
+
+        if (resolveWithinProject(project_path as string, material_path as string) === null) {
+          return toolError('Invalid material_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
           ]);
         }
 

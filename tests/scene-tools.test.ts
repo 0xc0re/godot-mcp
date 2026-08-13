@@ -23,6 +23,14 @@ vi.mock('fs', async () => {
 // Mock godot module
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
+  // Pure-path stand-in for the real resolveWithinProject: rejects null bytes,
+  // ".." traversal, and absolute paths; strips res:// and joins to the root.
+  resolveWithinProject: vi.fn((projectRoot: string, relPath: string) => {
+    if (typeof relPath !== 'string' || relPath.length === 0 || relPath.includes('\0')) return null;
+    const stripped = relPath.startsWith('res://') ? relPath.slice('res://'.length) : relPath;
+    if (stripped.startsWith('/') || stripped.split('/').includes('..')) return null;
+    return `${projectRoot}/${stripped}`;
+  }),
   executeOperation: vi.fn(),
   runOperation: vi.fn(),
 }));
@@ -804,6 +812,84 @@ describe('Scene MCP Tools', () => {
       }) as { isError?: boolean };
 
       expect(result.isError).toBe(true);
+    });
+  });
+
+  // ── path hardening rollout (resolveWithinProject) ───────────────────
+
+  describe('path hardening', () => {
+    beforeEach(() => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+    });
+
+    async function expectPathRejected(
+      tool: string,
+      params: Record<string, unknown>,
+      paramName: string,
+    ): Promise<void> {
+      const handler = handlers.get(tool)!;
+      const result = (await handler(params)) as {
+        isError?: boolean;
+        content?: Array<{ text: string }>;
+      };
+      expect(result.isError).toBe(true);
+      expect(result.content?.[0].text).toContain(paramName);
+    }
+
+    it('create_scene rejects scene_path traversal outside the project', async () => {
+      await expectPathRejected('create_scene', { project_path: '/proj', scene_path: '../../etc/evil.tscn' }, 'scene_path');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('create_scene rejects scene_path containing a null byte', async () => {
+      await expectPathRejected('create_scene', { project_path: '/proj', scene_path: 'scenes/\0evil.tscn' }, 'scene_path');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('create_scene rejects an absolute scene_path outside the project', async () => {
+      await expectPathRejected('create_scene', { project_path: '/proj', scene_path: '/etc/evil.tscn' }, 'scene_path');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('add_node rejects scene_path traversal before touching the scene file', async () => {
+      await expectPathRejected('add_node', { project_path: '/proj', scene_path: '../out.tscn', node_type: 'Node2D', node_name: 'N' }, 'scene_path');
+      expect(writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it('load_sprite rejects texture_path traversal', async () => {
+      await expectPathRejected('load_sprite', { project_path: '/proj', scene_path: 'scenes/main.tscn', node_path: 'root/Sprite', texture_path: '../../secret.png' }, 'texture_path');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('export_mesh_library rejects output_path traversal', async () => {
+      await expectPathRejected('export_mesh_library', { project_path: '/proj', scene_path: 'scenes/main.tscn', output_path: '../../out.res' }, 'output_path');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('save_scene rejects new_path traversal', async () => {
+      await expectPathRejected('save_scene', { project_path: '/proj', scene_path: 'scenes/main.tscn', new_path: '../../variant.tscn' }, 'new_path');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('read_scene rejects scene_path traversal before reading the file', async () => {
+      await expectPathRejected('read_scene', { project_path: '/proj', scene_path: '../../../etc/passwd' }, 'scene_path');
+      expect(readFileSync).not.toHaveBeenCalled();
+    });
+
+    it('modify_node_property rejects scene_path traversal', async () => {
+      await expectPathRejected('modify_node_property', { project_path: '/proj', scene_path: '../x.tscn', node_path: 'root', property_name: 'visible', value: true }, 'scene_path');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('remove_node rejects scene_path traversal', async () => {
+      await expectPathRejected('remove_node', { project_path: '/proj', scene_path: '../x.tscn', node_path: 'root/N' }, 'scene_path');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('attach_script rejects script_path traversal', async () => {
+      await expectPathRejected('attach_script', { project_path: '/proj', scene_path: 'scenes/main.tscn', node_path: 'root', script_path: '../../evil.gd' }, 'script_path');
+      expect(runOperation).not.toHaveBeenCalled();
     });
   });
 });

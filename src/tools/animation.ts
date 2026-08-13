@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { runOperation, validatePath } from '../godot.js';
+import { resolveWithinProject, runOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 
 export function registerAnimationTools(server: McpServer, ctx: ServerContext): void {
@@ -66,6 +66,13 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
           return toolError(`Not a valid Godot project: ${project_path}`, [
             'Ensure the path points to a directory containing a project.godot file',
             'Use list_projects to find valid Godot projects',
+          ]);
+        }
+
+        if (resolveWithinProject(project_path as string, output_path as string) === null) {
+          return toolError('Invalid output_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
           ]);
         }
 
@@ -144,6 +151,13 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
           return toolError(`Not a valid Godot project: ${project_path}`, [
             'Ensure the path points to a directory containing a project.godot file',
             'Use list_projects to find valid Godot projects',
+          ]);
+        }
+
+        if (resolveWithinProject(project_path as string, output_path as string) === null) {
+          return toolError('Invalid output_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
           ]);
         }
 
@@ -232,6 +246,13 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
           ]);
         }
 
+        if (resolveWithinProject(project_path as string, animation_path as string) === null) {
+          return toolError('Invalid animation_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
+
         const params: Record<string, unknown> = {
           animationPath: animation_path,
           keyframes,
@@ -313,6 +334,20 @@ export function registerAnimationTools(server: McpServer, ctx: ServerContext): v
           return toolError(`Not a valid Godot project: ${project_path}`, [
             'Ensure the path points to a directory containing a project.godot file',
             'Use list_projects to find valid Godot projects',
+          ]);
+        }
+
+        if (resolveWithinProject(project_path as string, scene_path as string) === null) {
+          return toolError('Invalid scene_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
+          ]);
+        }
+
+        if (resolveWithinProject(project_path as string, library_path as string) === null) {
+          return toolError('Invalid library_path: path resolves outside the project directory', [
+            'Use a path relative to the project root',
+            'Do not use "..", absolute paths, or symlinks that escape the project',
           ]);
         }
 

@@ -21,6 +21,14 @@ vi.mock('fs', async () => {
 // Mock godot module
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
+  // Pure-path stand-in for the real resolveWithinProject: rejects null bytes,
+  // ".." traversal, and absolute paths; strips res:// and joins to the root.
+  resolveWithinProject: vi.fn((projectRoot: string, relPath: string) => {
+    if (typeof relPath !== 'string' || relPath.length === 0 || relPath.includes('\0')) return null;
+    const stripped = relPath.startsWith('res://') ? relPath.slice('res://'.length) : relPath;
+    if (stripped.startsWith('/') || stripped.split('/').includes('..')) return null;
+    return `${projectRoot}/${stripped}`;
+  }),
   executeOperation: vi.fn(),
   runOperation: vi.fn(),
 }));
@@ -618,6 +626,49 @@ describe('Animation MCP Tools', () => {
 
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('not an AnimationPlayer');
+    });
+  });
+
+  // ── path hardening rollout (resolveWithinProject) ───────────────────
+
+  describe('path hardening', () => {
+    beforeEach(() => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+    });
+
+    async function expectPathRejected(
+      tool: string,
+      params: Record<string, unknown>,
+      paramName: string,
+    ): Promise<void> {
+      const handler = handlers.get(tool)!;
+      const result = (await handler(params)) as {
+        isError?: boolean;
+        content?: Array<{ text: string }>;
+      };
+      expect(result.isError).toBe(true);
+      expect(result.content?.[0].text).toContain(paramName);
+    }
+
+    it('create_animation rejects output_path traversal outside the project', async () => {
+      await expectPathRejected('create_animation', { project_path: '/proj', output_path: '../../evil.tres', tracks: [] }, 'output_path');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('create_animation_library rejects output_path traversal', async () => {
+      await expectPathRejected('create_animation_library', { project_path: '/proj', output_path: '../../evil.tres', animations: {} }, 'output_path');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('add_keyframes rejects animation_path traversal', async () => {
+      await expectPathRejected('add_keyframes', { project_path: '/proj', animation_path: '../../evil.tres', keyframes: [] }, 'animation_path');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('assign_animation_library rejects library_path traversal', async () => {
+      await expectPathRejected('assign_animation_library', { project_path: '/proj', scene_path: 'scenes/p.tscn', node_path: 'root/AnimationPlayer', library_name: 'default', library_path: '../../evil.tres' }, 'library_path');
+      expect(runOperation).not.toHaveBeenCalled();
     });
   });
 });

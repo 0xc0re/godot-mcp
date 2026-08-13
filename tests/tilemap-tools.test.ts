@@ -20,6 +20,14 @@ vi.mock('fs', async () => {
 // Mock godot module
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
+  // Pure-path stand-in for the real resolveWithinProject: rejects null bytes,
+  // ".." traversal, and absolute paths; strips res:// and joins to the root.
+  resolveWithinProject: vi.fn((projectRoot: string, relPath: string) => {
+    if (typeof relPath !== 'string' || relPath.length === 0 || relPath.includes('\0')) return null;
+    const stripped = relPath.startsWith('res://') ? relPath.slice('res://'.length) : relPath;
+    if (stripped.startsWith('/') || stripped.split('/').includes('..')) return null;
+    return `${projectRoot}/${stripped}`;
+  }),
   executeOperation: vi.fn(),
   runOperation: vi.fn(),
 }));
@@ -528,6 +536,44 @@ describe('TileMap MCP Tools', () => {
 
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('not a TileMapLayer');
+    });
+  });
+
+  // ── path hardening rollout (resolveWithinProject) ───────────────────
+
+  describe('path hardening', () => {
+    beforeEach(() => {
+      vi.mocked(validatePath).mockReturnValue(true);
+      vi.mocked(existsSync).mockReturnValue(true);
+    });
+
+    async function expectPathRejected(
+      tool: string,
+      params: Record<string, unknown>,
+      paramName: string,
+    ): Promise<void> {
+      const handler = handlers.get(tool)!;
+      const result = (await handler(params)) as {
+        isError?: boolean;
+        content?: Array<{ text: string }>;
+      };
+      expect(result.isError).toBe(true);
+      expect(result.content?.[0].text).toContain(paramName);
+    }
+
+    it('create_tileset rejects output_path traversal outside the project', async () => {
+      await expectPathRejected('create_tileset', { project_path: '/proj', output_path: '../../evil.tres', texture_path: 'textures/ground.png' }, 'output_path');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('create_tileset rejects texture_path traversal', async () => {
+      await expectPathRejected('create_tileset', { project_path: '/proj', output_path: 'tilesets/ground.tres', texture_path: '../../secret.png' }, 'texture_path');
+      expect(runOperation).not.toHaveBeenCalled();
+    });
+
+    it('paint_tilemap rejects scene_path traversal', async () => {
+      await expectPathRejected('paint_tilemap', { project_path: '/proj', scene_path: '../../evil.tscn', node_path: 'root/TileMapLayer', mode: 'clear' }, 'scene_path');
+      expect(runOperation).not.toHaveBeenCalled();
     });
   });
 });
