@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { join } from 'path';
 import { existsSync, readFileSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { executeOperation, validatePath } from '../godot.js';
+import { runOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 import { parseProjectSettings } from '../parsers/project-parser.js';
 
@@ -83,15 +83,10 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           deadzone: deadzone ?? 0.5,
         };
 
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path as string,
-          'add_input_action',
-          params,
-        );
+        const result = await runOperation(ctx, project_path as string, 'add_input_action', params);
 
-        if (stderr && (stderr.includes('Failed to') || stderr.includes('[ERROR]'))) {
-          return toolError(`Failed to add input action: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to add input action: ${result.error}`, [
             'Check that the action name is valid',
             'Verify event types and parameters are correct',
           ]);
@@ -101,7 +96,7 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           content: [
             {
               type: 'text' as const,
-              text: `Input action '${action_name}' added successfully\n\nOutput: ${stdout}`,
+              text: `Input action '${action_name}' added successfully\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };
@@ -148,15 +143,15 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           actionName: action_name,
         };
 
-        const { stdout, stderr } = await executeOperation(
+        const result = await runOperation(
           ctx,
           project_path as string,
           'remove_input_action',
           params,
         );
 
-        if (stderr && (stderr.includes('Failed to') || stderr.includes('[ERROR]'))) {
-          return toolError(`Failed to remove input action: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to remove input action: ${result.error}`, [
             'Check that the action name exists in the project',
             'Use list_input_actions to see current actions',
           ]);
@@ -166,7 +161,7 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           content: [
             {
               type: 'text' as const,
-              text: `Input action '${action_name}' removed successfully\n\nOutput: ${stdout}`,
+              text: `Input action '${action_name}' removed successfully\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };
@@ -346,15 +341,14 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
 
         for (const { layer, name } of typedLayers) {
           const key = `${physics_type as string}_physics/layer_${layer}`;
-          const { stderr } = await executeOperation(
+          const result = await runOperation(
             ctx,
             project_path as string,
             'modify_project_setting',
             { section: 'layer_names', key, value: name, action: 'set' },
           );
 
-          const success = !stderr || (!stderr.includes('Failed to') && !stderr.includes('[ERROR]'));
-          results.push({ layer, name, success });
+          results.push({ layer, name, success: result.ok });
         }
 
         const allSuccess = results.every((r) => r.success);
@@ -473,19 +467,18 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           const { bitmask, unresolved } = resolveBitmask(typedLayer);
           allUnresolved.push(...unresolved);
           if (unresolved.length === 0) {
-            const { stderr } = await executeOperation(
+            const result = await runOperation(
               ctx,
               project_path as string,
               'modify_node_property',
               {
                 scenePath: scene_path,
                 nodePath: node_path,
-                property: 'collision_layer',
+                propertyName: 'collision_layer',
                 value: bitmask,
               },
             );
-            const success = !stderr || (!stderr.includes('Failed to') && !stderr.includes('[ERROR]'));
-            results.push({ property: 'collision_layer', bitmask, success });
+            results.push({ property: 'collision_layer', bitmask, success: result.ok });
           }
         }
 
@@ -495,19 +488,18 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           const { bitmask, unresolved } = resolveBitmask(typedMask);
           allUnresolved.push(...unresolved);
           if (unresolved.length === 0) {
-            const { stderr } = await executeOperation(
+            const result = await runOperation(
               ctx,
               project_path as string,
               'modify_node_property',
               {
                 scenePath: scene_path,
                 nodePath: node_path,
-                property: 'collision_mask',
+                propertyName: 'collision_mask',
                 value: bitmask,
               },
             );
-            const success = !stderr || (!stderr.includes('Failed to') && !stderr.includes('[ERROR]'));
-            results.push({ property: 'collision_mask', bitmask, success });
+            results.push({ property: 'collision_mask', bitmask, success: result.ok });
           }
         }
 
@@ -657,15 +649,15 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
         const prefix = (enabled as boolean) !== false ? '*' : '';
         const resPath = `${prefix}res://${script_path as string}`;
 
-        const { stdout, stderr } = await executeOperation(
+        const result = await runOperation(
           ctx,
           project_path as string,
           'modify_project_setting',
           { section: 'autoload', key: name, value: resPath, action: 'set' },
         );
 
-        if (stderr && (stderr.includes('Failed to') || stderr.includes('[ERROR]'))) {
-          return toolError(`Failed to add autoload: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to add autoload: ${result.error}`, [
             'Check that the script path is valid',
             'Verify the autoload name is valid (PascalCase recommended)',
           ]);
@@ -722,15 +714,15 @@ export function registerConfigTools(server: McpServer, ctx: ServerContext): void
           ]);
         }
 
-        const { stdout, stderr } = await executeOperation(
+        const result = await runOperation(
           ctx,
           project_path as string,
           'modify_project_setting',
           { section: 'autoload', key: name, action: 'delete' },
         );
 
-        if (stderr && (stderr.includes('Failed to') || stderr.includes('[ERROR]'))) {
-          return toolError(`Failed to remove autoload: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to remove autoload: ${result.error}`, [
             'Check that the autoload name exists',
             'Use list_autoloads to see current autoloads',
           ]);

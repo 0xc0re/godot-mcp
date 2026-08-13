@@ -25,6 +25,7 @@ vi.mock('fs', async () => {
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
   executeOperation: vi.fn(),
+  runOperation: vi.fn(),
 }));
 
 // Mock errors module
@@ -41,7 +42,8 @@ vi.mock('../src/parsers/project-parser.js', () => ({
 }));
 
 import { existsSync, readFileSync } from 'fs';
-import { validatePath, executeOperation } from '../src/godot.js';
+import { validatePath, runOperation } from '../src/godot.js';
+import { toolError } from '../src/errors.js';
 import { parseProjectSettings } from '../src/parsers/project-parser.js';
 import { registerConfigTools } from '../src/tools/config.js';
 
@@ -118,10 +120,16 @@ describe('Config MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('calls executeOperation with camelCase params including key events', async () => {
+    it('calls runOperation with camelCase params including key events', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('add_input_action')!;
       await handler({
@@ -131,7 +139,7 @@ describe('Config MCP Tools', () => {
         deadzone: 0.5,
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'add_input_action',
@@ -146,7 +154,13 @@ describe('Config MCP Tools', () => {
     it('passes joypad_button events with button_index', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('add_input_action')!;
       await handler({
@@ -155,7 +169,7 @@ describe('Config MCP Tools', () => {
         events: [{ type: 'joypad_button', button_index: 0 }],
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'add_input_action',
@@ -169,7 +183,13 @@ describe('Config MCP Tools', () => {
     it('passes joypad_motion events with axis and axis_value', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('add_input_action')!;
       await handler({
@@ -178,7 +198,7 @@ describe('Config MCP Tools', () => {
         events: [{ type: 'joypad_motion', axis: 0, axis_value: 1.0 }],
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'add_input_action',
@@ -189,12 +209,15 @@ describe('Config MCP Tools', () => {
       );
     });
 
-    it('returns toolError when stderr contains "Failed to"', async () => {
+    it('returns toolError when runOperation yields ok:false', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Unknown event type: bogus',
         stdout: '',
-        stderr: 'Failed to add input action',
+        stderr: '',
+        exitCode: 1,
       });
 
       const handler = handlers.get('add_input_action')!;
@@ -205,14 +228,21 @@ describe('Config MCP Tools', () => {
       }) as { isError?: boolean };
 
       expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Unknown event type: bogus'),
+        expect.any(Array),
+      );
     });
 
-    it('returns stdout on success', async () => {
+    it('returns success output with operation data', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
-        stdout: '{"success":true,"action":"jump"}',
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, action: 'jump', event_count: 1 },
+        stdout: '',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('add_input_action')!;
@@ -225,10 +255,10 @@ describe('Config MCP Tools', () => {
       expect(result.content[0].text).toContain('jump');
     });
 
-    it('returns toolError on executeOperation exception', async () => {
+    it('returns toolError when runOperation rejects unexpectedly', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
+      vi.mocked(runOperation).mockRejectedValue(new Error('Process failed'));
 
       const handler = handlers.get('add_input_action')!;
       const result = await handler({
@@ -243,7 +273,13 @@ describe('Config MCP Tools', () => {
     it('uses default deadzone of 0.5 when not provided', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('add_input_action')!;
       await handler({
@@ -252,7 +288,7 @@ describe('Config MCP Tools', () => {
         events: [{ type: 'key', key: 'space' }],
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'add_input_action',
@@ -295,10 +331,16 @@ describe('Config MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('calls executeOperation with actionName param', async () => {
+    it('calls runOperation with actionName param', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('remove_input_action')!;
       await handler({
@@ -306,7 +348,7 @@ describe('Config MCP Tools', () => {
         action_name: 'jump',
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'remove_input_action',
@@ -316,12 +358,15 @@ describe('Config MCP Tools', () => {
       );
     });
 
-    it('returns stdout on success', async () => {
+    it('returns success output with operation data', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
-        stdout: '{"success":true,"removed":"jump"}',
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true, action: 'jump' },
+        stdout: '',
         stderr: '',
+        exitCode: 0,
       });
 
       const handler = handlers.get('remove_input_action')!;
@@ -333,12 +378,15 @@ describe('Config MCP Tools', () => {
       expect(result.content[0].text).toContain('jump');
     });
 
-    it('returns toolError on stderr error', async () => {
+    it('returns toolError when runOperation yields ok:false', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Input action not found: jump',
         stdout: '',
-        stderr: 'Failed to remove input action',
+        stderr: '',
+        exitCode: 1,
       });
 
       const handler = handlers.get('remove_input_action')!;
@@ -348,12 +396,16 @@ describe('Config MCP Tools', () => {
       }) as { isError?: boolean };
 
       expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Input action not found: jump'),
+        expect.any(Array),
+      );
     });
 
-    it('returns toolError on executeOperation exception', async () => {
+    it('returns toolError when runOperation rejects unexpectedly', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
+      vi.mocked(runOperation).mockRejectedValue(new Error('Process failed'));
 
       const handler = handlers.get('remove_input_action')!;
       const result = await handler({
@@ -638,10 +690,16 @@ describe('Config MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('calls executeOperation with modify_project_setting for each layer', async () => {
+    it('calls runOperation with modify_project_setting for each layer', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('set_collision_layer_names')!;
       await handler({
@@ -653,14 +711,14 @@ describe('Config MCP Tools', () => {
         ],
       });
 
-      expect(executeOperation).toHaveBeenCalledTimes(2);
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledTimes(2);
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'modify_project_setting',
         { section: 'layer_names', key: '3d_physics/layer_1', value: 'Player', action: 'set' },
       );
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'modify_project_setting',
@@ -671,7 +729,13 @@ describe('Config MCP Tools', () => {
     it('returns success with layers_set array', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('set_collision_layer_names')!;
       const result = await handler({
@@ -692,12 +756,24 @@ describe('Config MCP Tools', () => {
       ]);
     });
 
-    it('marks individual layers as failed when stderr contains error', async () => {
+    it('marks individual layers as failed when runOperation yields ok:false', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation)
-        .mockResolvedValueOnce({ stdout: '{"success":true}', stderr: '' })
-        .mockResolvedValueOnce({ stdout: '', stderr: 'Failed to modify setting' });
+      vi.mocked(runOperation)
+        .mockResolvedValueOnce({
+          ok: true,
+          data: { success: true },
+          stdout: '',
+          stderr: '',
+          exitCode: 0,
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          error: 'Failed to save project.godot: error code 1',
+          stdout: '',
+          stderr: '',
+          exitCode: 1,
+        });
 
       const handler = handlers.get('set_collision_layer_names')!;
       const result = await handler({
@@ -715,10 +791,10 @@ describe('Config MCP Tools', () => {
       expect(parsed.layers_set[1].success).toBe(false);
     });
 
-    it('returns toolError on executeOperation exception', async () => {
+    it('returns toolError when runOperation rejects unexpectedly', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
+      vi.mocked(runOperation).mockRejectedValue(new Error('Process failed'));
 
       const handler = handlers.get('set_collision_layer_names')!;
       const result = await handler({
@@ -798,7 +874,13 @@ describe('Config MCP Tools', () => {
         },
         configVersion: 5,
       });
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('set_node_collision')!;
       await handler({
@@ -810,14 +892,14 @@ describe('Config MCP Tools', () => {
       });
 
       // layer 1 (Player) = bit 0 = 1, layer 3 (Enemy) = bit 2 = 4, combined = 5
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'modify_node_property',
         {
           scenePath: 'scenes/player.tscn',
           nodePath: '.',
-          property: 'collision_layer',
+          propertyName: 'collision_layer',
           value: 5,
         },
       );
@@ -852,7 +934,7 @@ describe('Config MCP Tools', () => {
       expect(parsed.error).toContain('NonExistent');
     });
 
-    it('calls executeOperation with modify_node_property for both collision_layer and collision_mask', async () => {
+    it('calls runOperation with modify_node_property for both collision_layer and collision_mask', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
       vi.mocked(readFileSync).mockReturnValue('file content');
@@ -866,7 +948,13 @@ describe('Config MCP Tools', () => {
         },
         configVersion: 5,
       });
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('set_node_collision')!;
       const result = await handler({
@@ -878,28 +966,28 @@ describe('Config MCP Tools', () => {
         physics_type: '3d',
       }) as { content: Array<{ text: string }> };
 
-      expect(executeOperation).toHaveBeenCalledTimes(2);
+      expect(runOperation).toHaveBeenCalledTimes(2);
       // collision_layer: Player = layer 1 = bit 0 = 1
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'modify_node_property',
         {
           scenePath: 'scenes/player.tscn',
           nodePath: 'Player/CollisionShape3D',
-          property: 'collision_layer',
+          propertyName: 'collision_layer',
           value: 1,
         },
       );
       // collision_mask: Environment = layer 2 = bit 1 = 2, Enemy = layer 3 = bit 2 = 4, combined = 6
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'modify_node_property',
         {
           scenePath: 'scenes/player.tscn',
           nodePath: 'Player/CollisionShape3D',
-          property: 'collision_mask',
+          propertyName: 'collision_mask',
           value: 6,
         },
       );
@@ -909,7 +997,7 @@ describe('Config MCP Tools', () => {
       expect(parsed.results).toHaveLength(2);
     });
 
-    it('returns toolError on executeOperation exception', async () => {
+    it('returns toolError when runOperation rejects unexpectedly', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
       vi.mocked(readFileSync).mockReturnValue('file content');
@@ -921,7 +1009,7 @@ describe('Config MCP Tools', () => {
         },
         configVersion: 5,
       });
-      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
+      vi.mocked(runOperation).mockRejectedValue(new Error('Process failed'));
 
       const handler = handlers.get('set_node_collision')!;
       const result = await handler({
@@ -1120,13 +1208,19 @@ describe('Config MCP Tools', () => {
       expect(parsed.error).toContain('Script file not found');
     });
 
-    it('calls executeOperation with correct *res:// prefix format for enabled autoload', async () => {
+    it('calls runOperation with correct *res:// prefix format for enabled autoload', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockImplementation((path: unknown) => {
         // Both project.godot and script file exist
         return true;
       });
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('add_autoload')!;
       await handler({
@@ -1136,7 +1230,7 @@ describe('Config MCP Tools', () => {
         enabled: true,
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'modify_project_setting',
@@ -1149,10 +1243,16 @@ describe('Config MCP Tools', () => {
       );
     });
 
-    it('calls executeOperation with res:// prefix (no *) for disabled autoload', async () => {
+    it('calls runOperation with res:// prefix (no *) for disabled autoload', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('add_autoload')!;
       await handler({
@@ -1162,7 +1262,7 @@ describe('Config MCP Tools', () => {
         enabled: false,
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'modify_project_setting',
@@ -1178,7 +1278,13 @@ describe('Config MCP Tools', () => {
     it('returns success JSON on successful add', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('add_autoload')!;
       const result = await handler({
@@ -1195,12 +1301,15 @@ describe('Config MCP Tools', () => {
       expect(parsed.enabled).toBe(true);
     });
 
-    it('returns toolError on stderr error', async () => {
+    it('returns toolError when runOperation yields ok:false', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Failed to save project.godot: error code 1',
         stdout: '',
-        stderr: 'Failed to add autoload',
+        stderr: '',
+        exitCode: 1,
       });
 
       const handler = handlers.get('add_autoload')!;
@@ -1214,10 +1323,10 @@ describe('Config MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('returns toolError on executeOperation exception', async () => {
+    it('returns toolError when runOperation rejects unexpectedly', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
+      vi.mocked(runOperation).mockRejectedValue(new Error('Process failed'));
 
       const handler = handlers.get('add_autoload')!;
       const result = await handler({
@@ -1263,10 +1372,16 @@ describe('Config MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('calls executeOperation with delete action', async () => {
+    it('calls runOperation with delete action', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('remove_autoload')!;
       await handler({
@@ -1274,7 +1389,7 @@ describe('Config MCP Tools', () => {
         name: 'EventBus',
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'modify_project_setting',
@@ -1285,7 +1400,13 @@ describe('Config MCP Tools', () => {
     it('returns success JSON on successful removal', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('remove_autoload')!;
       const result = await handler({
@@ -1299,12 +1420,15 @@ describe('Config MCP Tools', () => {
       expect(parsed.action).toBe('removed');
     });
 
-    it('returns toolError on stderr error', async () => {
+    it('returns toolError when runOperation yields ok:false', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Failed to load project.godot: error code 1',
         stdout: '',
-        stderr: 'Failed to remove autoload',
+        stderr: '',
+        exitCode: 1,
       });
 
       const handler = handlers.get('remove_autoload')!;
@@ -1316,10 +1440,10 @@ describe('Config MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('returns toolError on executeOperation exception', async () => {
+    it('returns toolError when runOperation rejects unexpectedly', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
+      vi.mocked(runOperation).mockRejectedValue(new Error('Process failed'));
 
       const handler = handlers.get('remove_autoload')!;
       const result = await handler({

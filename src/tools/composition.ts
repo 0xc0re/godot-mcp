@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import type { ServerContext } from '../types.js';
-import { executeOperation, validatePath } from '../godot.js';
+import { runOperation, validatePath } from '../godot.js';
 import { toolError } from '../errors.js';
 
 export function registerCompositionTools(server: McpServer, ctx: ServerContext): void {
@@ -66,15 +66,10 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           methodName: method_name,
         };
 
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path,
-          'connect_signal',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'connect_signal', params);
 
-        if (stderr && (stderr.includes('Failed to') || stderr.includes('[ERROR]'))) {
-          return toolError(`Failed to connect signal: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to connect signal: ${result.error}`, [
             'Check that both source and target nodes exist in the scene',
             'Verify the signal name is valid for the source node type',
             'Ensure the method name is correct',
@@ -85,7 +80,7 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           content: [
             {
               type: 'text' as const,
-              text: `Signal '${signal_name}' connected from '${source_node_path}' to '${target_node_path}.${method_name}'\n\nOutput: ${stdout}`,
+              text: `Signal '${signal_name}' connected from '${source_node_path}' to '${target_node_path}.${method_name}'\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };
@@ -150,15 +145,10 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           methodName: method_name,
         };
 
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path,
-          'disconnect_signal',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'disconnect_signal', params);
 
-        if (stderr && (stderr.includes('Failed to') || stderr.includes('[ERROR]'))) {
-          return toolError(`Failed to disconnect signal: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to disconnect signal: ${result.error}`, [
             'Check that the signal connection exists',
             'Verify the source and target node paths are correct',
             'Ensure the signal and method names match the existing connection',
@@ -169,7 +159,7 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           content: [
             {
               type: 'text' as const,
-              text: `Signal '${signal_name}' disconnected from '${source_node_path}' to '${target_node_path}.${method_name}'\n\nOutput: ${stdout}`,
+              text: `Signal '${signal_name}' disconnected from '${source_node_path}' to '${target_node_path}.${method_name}'\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };
@@ -232,15 +222,10 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           params.nodeName = node_name;
         }
 
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path,
-          'instance_scene',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'instance_scene', params);
 
-        if (stderr && (stderr.includes('Failed to') || stderr.includes('[ERROR]'))) {
-          return toolError(`Failed to instance scene: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to instance scene: ${result.error}`, [
             'Check that the child scene path is correct and the .tscn file exists',
             'Verify the parent node path exists in the scene',
             'Ensure the child scene is a valid Godot scene file',
@@ -251,7 +236,7 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           content: [
             {
               type: 'text' as const,
-              text: `Scene '${child_scene_path}' instanced under '${parent_node_path}'\n\nOutput: ${stdout}`,
+              text: `Scene '${child_scene_path}' instanced under '${parent_node_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };
@@ -318,15 +303,10 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           operations: ops,
         };
 
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path,
-          'batch_set_properties',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'batch_set_properties', params);
 
-        if (stderr && (stderr.includes('Failed to') || stderr.includes('[ERROR]'))) {
-          return toolError(`Failed to set properties: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to set properties: ${result.error}`, [
             'Check that all node paths exist in the scene',
             'Verify property names are valid for each node type',
             'Ensure value types match the property types',
@@ -337,7 +317,7 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           content: [
             {
               type: 'text' as const,
-              text: `Batch properties set on ${ops.length} operation(s)\n\nOutput: ${stdout}`,
+              text: `Batch properties set on ${ops.length} operation(s)\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };
@@ -408,15 +388,10 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           params.removeGroups = removeArr;
         }
 
-        const { stdout, stderr } = await executeOperation(
-          ctx,
-          project_path,
-          'manage_groups',
-          params,
-        );
+        const result = await runOperation(ctx, project_path, 'manage_groups', params);
 
-        if (stderr && (stderr.includes('Failed to') || stderr.includes('[ERROR]'))) {
-          return toolError(`Failed to manage groups: ${stderr}`, [
+        if (!result.ok) {
+          return toolError(`Failed to manage groups: ${result.error}`, [
             'Check that the node path exists in the scene',
             'Verify the group names are valid strings',
           ]);
@@ -426,7 +401,7 @@ export function registerCompositionTools(server: McpServer, ctx: ServerContext):
           content: [
             {
               type: 'text' as const,
-              text: `Groups updated for node '${node_path}'\n\nOutput: ${stdout}`,
+              text: `Groups updated for node '${node_path}'\n\nOutput: ${JSON.stringify(result.data)}`,
             },
           ],
         };

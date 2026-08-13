@@ -22,6 +22,7 @@ vi.mock('fs', async () => {
 vi.mock('../src/godot.js', () => ({
   validatePath: vi.fn(),
   executeOperation: vi.fn(),
+  runOperation: vi.fn(),
 }));
 
 // Mock errors module
@@ -33,7 +34,8 @@ vi.mock('../src/errors.js', () => ({
 }));
 
 import { existsSync } from 'fs';
-import { validatePath, executeOperation } from '../src/godot.js';
+import { validatePath, runOperation } from '../src/godot.js';
+import { toolError } from '../src/errors.js';
 import { registerCompositionTools } from '../src/tools/composition.js';
 
 // Helper to extract registered tool handlers from McpServer
@@ -82,10 +84,16 @@ describe('Composition MCP Tools', () => {
       expect(handlers.has('connect_signal')).toBe(true);
     });
 
-    it('passes correct params to executeOperation', async () => {
+    it('passes correct params to runOperation', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('connect_signal')!;
       await handler({
@@ -97,7 +105,7 @@ describe('Composition MCP Tools', () => {
         method_name: '_on_button_pressed',
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'connect_signal',
@@ -144,10 +152,10 @@ describe('Composition MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('returns toolError on executeOperation error', async () => {
+    it('returns toolError when runOperation rejects unexpectedly', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
+      vi.mocked(runOperation).mockRejectedValue(new Error('Process failed'));
 
       const handler = handlers.get('connect_signal')!;
       const result = await handler({
@@ -162,12 +170,15 @@ describe('Composition MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('returns toolError on stderr error', async () => {
+    it('returns toolError when runOperation yields ok:false', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: "Signal 'pressed' does not exist on node",
         stdout: '',
-        stderr: '[ERROR] Failed to connect signal',
+        stderr: '',
+        exitCode: 1,
       });
 
       const handler = handlers.get('connect_signal')!;
@@ -181,6 +192,10 @@ describe('Composition MCP Tools', () => {
       }) as { isError?: boolean };
 
       expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining("Signal 'pressed' does not exist on node"),
+        expect.any(Array),
+      );
     });
   });
 
@@ -191,10 +206,16 @@ describe('Composition MCP Tools', () => {
       expect(handlers.has('disconnect_signal')).toBe(true);
     });
 
-    it('passes correct params to executeOperation', async () => {
+    it('passes correct params to runOperation', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('disconnect_signal')!;
       await handler({
@@ -206,7 +227,7 @@ describe('Composition MCP Tools', () => {
         method_name: '_on_button_pressed',
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'disconnect_signal',
@@ -253,10 +274,10 @@ describe('Composition MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('returns toolError on executeOperation error', async () => {
+    it('returns toolError when runOperation rejects unexpectedly', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
+      vi.mocked(runOperation).mockRejectedValue(new Error('Process failed'));
 
       const handler = handlers.get('disconnect_signal')!;
       const result = await handler({
@@ -271,12 +292,15 @@ describe('Composition MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('returns toolError on stderr error', async () => {
+    it('returns toolError when runOperation yields ok:false', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Signal not connected: pressed',
         stdout: '',
-        stderr: 'Failed to disconnect signal',
+        stderr: '',
+        exitCode: 1,
       });
 
       const handler = handlers.get('disconnect_signal')!;
@@ -290,6 +314,10 @@ describe('Composition MCP Tools', () => {
       }) as { isError?: boolean };
 
       expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Signal not connected: pressed'),
+        expect.any(Array),
+      );
     });
   });
 
@@ -300,10 +328,16 @@ describe('Composition MCP Tools', () => {
       expect(handlers.has('instance_scene')).toBe(true);
     });
 
-    it('passes correct params to executeOperation', async () => {
+    it('passes correct params to runOperation', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('instance_scene')!;
       await handler({
@@ -314,7 +348,7 @@ describe('Composition MCP Tools', () => {
         node_name: 'Enemy1',
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'instance_scene',
@@ -330,7 +364,13 @@ describe('Composition MCP Tools', () => {
     it('works without optional node_name param', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('instance_scene')!;
       await handler({
@@ -340,7 +380,7 @@ describe('Composition MCP Tools', () => {
         parent_node_path: 'root/Enemies',
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'instance_scene',
@@ -381,10 +421,10 @@ describe('Composition MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('returns toolError on executeOperation error', async () => {
+    it('returns toolError when runOperation rejects unexpectedly', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
+      vi.mocked(runOperation).mockRejectedValue(new Error('Process failed'));
 
       const handler = handlers.get('instance_scene')!;
       const result = await handler({
@@ -397,12 +437,15 @@ describe('Composition MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('returns toolError on stderr error', async () => {
+    it('returns toolError when runOperation yields ok:false', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Failed to load child scene: scenes/enemy.tscn',
         stdout: '',
-        stderr: '[ERROR] Failed to instance scene',
+        stderr: '',
+        exitCode: 1,
       });
 
       const handler = handlers.get('instance_scene')!;
@@ -414,6 +457,10 @@ describe('Composition MCP Tools', () => {
       }) as { isError?: boolean };
 
       expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to load child scene: scenes/enemy.tscn'),
+        expect.any(Array),
+      );
     });
   });
 
@@ -424,10 +471,16 @@ describe('Composition MCP Tools', () => {
       expect(handlers.has('batch_set_properties')).toBe(true);
     });
 
-    it('passes operations array to executeOperation', async () => {
+    it('passes operations array to runOperation', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const ops = [
         { node_path: 'root/Player', property_name: 'position', value: { x: 100, y: 200 }, value_type: 'Vector2' },
@@ -441,7 +494,7 @@ describe('Composition MCP Tools', () => {
         operations: ops,
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'batch_set_properties',
@@ -479,10 +532,10 @@ describe('Composition MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('returns toolError on executeOperation error', async () => {
+    it('returns toolError when runOperation rejects unexpectedly', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
+      vi.mocked(runOperation).mockRejectedValue(new Error('Process failed'));
 
       const handler = handlers.get('batch_set_properties')!;
       const result = await handler({
@@ -494,12 +547,15 @@ describe('Composition MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('returns toolError on stderr error', async () => {
+    it('returns toolError when runOperation yields ok:false', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Node not found during validation: root/Missing',
         stdout: '',
-        stderr: '[ERROR] Failed to set properties',
+        stderr: '',
+        exitCode: 1,
       });
 
       const handler = handlers.get('batch_set_properties')!;
@@ -510,6 +566,10 @@ describe('Composition MCP Tools', () => {
       }) as { isError?: boolean };
 
       expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Node not found during validation: root/Missing'),
+        expect.any(Array),
+      );
     });
   });
 
@@ -523,7 +583,13 @@ describe('Composition MCP Tools', () => {
     it('passes correct params with both add and remove groups', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('manage_groups')!;
       await handler({
@@ -534,7 +600,7 @@ describe('Composition MCP Tools', () => {
         remove_groups: ['allies'],
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'manage_groups',
@@ -550,7 +616,13 @@ describe('Composition MCP Tools', () => {
     it('works with only add_groups (no remove_groups)', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('manage_groups')!;
       await handler({
@@ -560,7 +632,7 @@ describe('Composition MCP Tools', () => {
         add_groups: ['enemies'],
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'manage_groups',
@@ -575,7 +647,13 @@ describe('Composition MCP Tools', () => {
     it('works with only remove_groups (no add_groups)', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({ stdout: '{"success":true}', stderr: '' });
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: true,
+        data: { success: true },
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      });
 
       const handler = handlers.get('manage_groups')!;
       await handler({
@@ -585,7 +663,7 @@ describe('Composition MCP Tools', () => {
         remove_groups: ['allies'],
       });
 
-      expect(executeOperation).toHaveBeenCalledWith(
+      expect(runOperation).toHaveBeenCalledWith(
         ctx,
         '/my/project',
         'manage_groups',
@@ -640,10 +718,10 @@ describe('Composition MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('returns toolError on executeOperation error', async () => {
+    it('returns toolError when runOperation rejects unexpectedly', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockRejectedValue(new Error('Process failed'));
+      vi.mocked(runOperation).mockRejectedValue(new Error('Process failed'));
 
       const handler = handlers.get('manage_groups')!;
       const result = await handler({
@@ -656,12 +734,15 @@ describe('Composition MCP Tools', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('returns toolError on stderr error', async () => {
+    it('returns toolError when runOperation yields ok:false', async () => {
       vi.mocked(validatePath).mockReturnValue(true);
       vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(executeOperation).mockResolvedValue({
+      vi.mocked(runOperation).mockResolvedValue({
+        ok: false,
+        error: 'Node not found: root/Player',
         stdout: '',
-        stderr: 'Failed to manage groups',
+        stderr: '',
+        exitCode: 1,
       });
 
       const handler = handlers.get('manage_groups')!;
@@ -673,6 +754,10 @@ describe('Composition MCP Tools', () => {
       }) as { isError?: boolean };
 
       expect(result.isError).toBe(true);
+      expect(toolError).toHaveBeenCalledWith(
+        expect.stringContaining('Node not found: root/Player'),
+        expect.any(Array),
+      );
     });
   });
 });
