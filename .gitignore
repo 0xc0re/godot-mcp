@@ -14,6 +14,9 @@ yarn-error.log*
 # Environment variables
 .env*
 
+# Local MCP client config (machine-specific absolute paths; see README for the pattern)
+.mcp.json
+
 # OS files
 .DS_Store
 Thumbs.db
