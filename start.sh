@@ -20,4 +20,6 @@ echo "Building..."
 npm run build
 
 echo "Starting godot-mcp server..."
-node build/index.js
+# Launch with the same absolute path the pgrep above matches, so the next
+# start.sh run can find (and replace) this process.
+node "$SERVER_PATH"
